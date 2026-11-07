@@ -63,9 +63,15 @@ class ScanObject(Base):
         "WasteScan",
         back_populates="detected_objects"
     )
-    
+
     material_classifications = relationship(
     "ScanObjectMaterial",
+    back_populates="scan_object",
+    cascade="all, delete-orphan"
+    )
+
+    recommendations = relationship(
+    "Recommendation",
     back_populates="scan_object",
     cascade="all, delete-orphan"
     )

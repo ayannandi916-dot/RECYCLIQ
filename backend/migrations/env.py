@@ -11,7 +11,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from app.database.base import Base
-from app.models import User
+from app.models import (
+    User,
+    Material,
+    WasteScan,
+    ScanObject,
+    ScanObjectMaterial,
+    Recommendation,
+    RecyclingCentre,
+    RecyclingCentreMaterial
+)
 
 config = context.config
 
@@ -29,7 +38,7 @@ config.set_main_option(
 )
 
 target_metadata = Base.metadata
-target_metadata = Base.metadata
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
