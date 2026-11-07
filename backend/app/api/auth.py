@@ -13,6 +13,12 @@ from app.services.auth_service import (
     login_user
 )
 
+from app.api.dependencies import get_current_user
+from app.models import User
+
+
+
+
 router = APIRouter(
     prefix="/auth",
     tags=["Authentication"]
@@ -65,3 +71,21 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password!"
         )
+
+@router.get(
+    "/me",
+    response_model=UserResponse
+)
+def get_me(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Return the currently authenticated user's information.
+    """
+
+    return UserResponse(
+        id=str(current_user.id),
+        name=current_user.name,
+        email=current_user.email,
+        role=current_user.role
+    )
