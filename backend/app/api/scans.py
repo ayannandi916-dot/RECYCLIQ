@@ -13,6 +13,7 @@ from app.database.dependencies import get_db
 from app.models import User, WasteScan
 from app.utils.image_validator import validate_image
 from app.services.cloudinary_service import upload_image
+from fastapi import Query
 
 
 router = APIRouter(
@@ -59,3 +60,42 @@ async def upload_waste_image(
             status_code=500,
             detail="Failed to upload image or create scan."
         )
+
+@router.get("/history")
+def get_scan_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50)
+):
+    offset = (page - 1) * limit
+
+    scans = (
+        db.query(WasteScan)
+        .filter(WasteScan.user_id == current_user.id)
+        .order_by(WasteScan.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    total_scans = (
+        db.query(WasteScan)
+        .filter(WasteScan.user_id == current_user.id)
+        .count()
+    )
+
+    return {
+        "total_scans": total_scans,
+        "page": page,
+        "limit": limit,
+        "scans": [
+            {
+                "scan_id": str(scan.id),
+                "image_url": scan.image_url,
+                "scan_status": scan.scan_status,
+                "created_at": scan.created_at
+            }
+            for scan in scans
+        ]
+    }
