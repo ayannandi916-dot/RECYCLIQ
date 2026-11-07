@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from app.database.connection import engine
 from app.api.auth import router as auth_router
+from app.api.scans import router as scans_router
 
 app = FastAPI(
     title="RECYCLIQ API",
@@ -9,6 +10,7 @@ app = FastAPI(
     version="0.1.0"
 )
 app.include_router(auth_router)
+app.include_router(scans_router)
 
 @app.get("/")
 async def root():
