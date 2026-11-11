@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
 
+
 def configure_cloudinary():
     """
     Configure Cloudinary using environment variables.
