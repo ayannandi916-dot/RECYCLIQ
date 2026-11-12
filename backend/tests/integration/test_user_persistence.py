@@ -760,6 +760,20 @@ def create_recycling_centre(db_session):
 
     return centre
 
+def create_recycler(db_session):
+    recycler = User(
+        name="Integration Recycler",
+        email=f"recycler_{uuid.uuid4().hex}@recycliq.test",
+        password_hash="integration-test-hash",
+        role="recycler"
+    )
+
+    db_session.add(recycler)
+    db_session.commit()
+
+    return recycler
+
+
 
 def create_material(db_session):
     material = Material(
@@ -1555,3 +1569,82 @@ def test_api_scan_details_with_real_relationships(
     assert detected["recommendations"][0]["title"] == (
         "Recycle Plastic"
     )
+
+def test_recycler_can_own_multiple_centres(db_session):
+    recycler = create_recycler(db_session)
+
+    centre1 = RecyclingCentre(
+        name="Green Earth Recycling",
+        address="12 Eco Park Road",
+        city="Kolkata",
+        state="West Bengal",
+        latitude=22.5726,
+        longitude=88.3639,
+        owner=recycler
+    )
+
+    centre2 = RecyclingCentre(
+        name="Eco Waste Solutions",
+        address="24 Salt Lake",
+        city="Kolkata",
+        state="West Bengal",
+        latitude=22.5800,
+        longitude=88.4200,
+        owner=recycler
+    )
+
+    db_session.add_all([centre1, centre2])
+    db_session.commit()
+    db_session.refresh(recycler)
+
+    assert len(recycler.recycling_centres) == 2
+
+    assert centre1.owner_id == recycler.id
+    assert centre2.owner_id == recycler.id
+
+    assert centre1.owner.id == recycler.id
+    assert centre2.owner.id == recycler.id
+
+def test_different_recyclers_have_separate_centres(db_session):
+    recycler1 = create_recycler(db_session)
+    recycler2 = create_recycler(db_session)
+
+    centre1 = create_recycling_centre(db_session)
+    centre2 = create_recycling_centre(db_session)
+
+    centre1.owner = recycler1
+    centre2.owner = recycler2
+
+    db_session.commit()
+
+    db_session.refresh(recycler1)
+    db_session.refresh(recycler2)
+
+    assert len(recycler1.recycling_centres) == 1
+    assert len(recycler2.recycling_centres) == 1
+
+    assert recycler1.recycling_centres[0].id == centre1.id
+    assert recycler2.recycling_centres[0].id == centre2.id
+
+def test_deleting_recycler_with_owned_centres_is_restricted(
+    db_session
+):
+    recycler = create_recycler(db_session)
+
+    centre = create_recycling_centre(db_session)
+    centre.owner = recycler
+
+    db_session.commit()
+
+    recycler_id = recycler.id
+    centre_id = centre.id
+
+    db_session.delete(recycler)
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+    db_session.rollback()
+
+    assert db_session.get(User, recycler_id) is not None
+    assert db_session.get(RecyclingCentre, centre_id) is not None

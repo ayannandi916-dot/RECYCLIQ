@@ -46,7 +46,21 @@ class User(Base):
     )
     
     waste_scans = relationship(
-    "WasteScan",
-    back_populates="user",
-    cascade="all, delete-orphan"
+        "WasteScan",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+    recycling_centres = relationship(
+        "RecyclingCentre",
+        back_populates="owner",
+        passive_deletes=True
+    )
+
+    recycler_application = relationship(
+        "RecyclerApplication",
+        foreign_keys="RecyclerApplication.user_id",
+        back_populates="applicant",
+        uselist=False,
+        cascade="all, delete-orphan",
     )

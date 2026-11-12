@@ -6,6 +6,7 @@ from app.models.scan_object_material import ScanObjectMaterial
 from app.models.recommendation import Recommendation
 from app.models.recycling_centre import RecyclingCentre
 from app.models.recycling_centre_material import RecyclingCentreMaterial
+from app.models.recycler_application import RecyclerApplication
 
 __all__ = [
     "User",
@@ -15,5 +16,6 @@ __all__ = [
     "ScanObjectMaterial",
     "Recommendation",
     "RecyclingCentre",
-    "RecyclingCentreMaterial"
+    "RecyclingCentreMaterial",
+    "RecyclerApplication",
 ]

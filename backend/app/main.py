@@ -5,6 +5,8 @@ from app.api.auth import router as auth_router
 from app.api.scans import router as scans_router
 from app.api.ai import router as ai_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.recycler import router as recycler_router
+from app.api.recycler import admin_router as admin_recycler_router
 
 app = FastAPI(
     title="RECYCLIQ API",
@@ -21,6 +23,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(scans_router)
 app.include_router(ai_router)
+app.include_router(recycler_router)
+app.include_router(admin_recycler_router)
 
 @app.get("/")
 async def root():
