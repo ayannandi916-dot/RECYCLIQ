@@ -39,7 +39,7 @@ class RecyclerApplication(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        
     )
 
     business_name: Mapped[str] = mapped_column(
