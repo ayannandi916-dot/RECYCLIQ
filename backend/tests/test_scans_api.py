@@ -322,7 +322,8 @@ def test_successful_scan_upload(
 
     def fake_upload(file):
         return {
-            "image_url": "https://example.com/uploaded.jpg"
+            "image_url": "https://example.com/uploaded.jpg",
+            "public_id": "recycliq/scans/test-image"
         }
 
     def fake_refresh(obj):
@@ -411,7 +412,7 @@ def test_scan_upload_cloudinary_failure(
     mock_db.rollback.assert_called_once()
 
 
-# 13. Database commit failure
+# 13. Database commit failure (without a Cloudinary public ID)
 def test_scan_upload_database_failure(
     client,
     mock_db,
@@ -420,33 +421,170 @@ def test_scan_upload_database_failure(
     async def fake_validate(file):
         return True
 
+    monkeypatch.setattr(scans, "validate_image", fake_validate)
     monkeypatch.setattr(
         scans,
-        "validate_image",
-        lambda file: {
-            "image_url": "https://example.com/test.jpg"
+        "upload_image",
+        lambda file: {"image_url": "https://example.com/test.jpg"}
+    )
+
+    mock_db.commit.side_effect = RuntimeError("Database commit failed")
+
+    response = client.post(
+        "/scans/upload",
+        files={
+            "file": ("test.jpg", BytesIO(b"test-image-data"), "image/jpeg")
         }
     )
 
-    async def fake_validate_image(file):
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Failed to upload image or create scan."
+    )
+    mock_db.add.assert_called_once()
+    mock_db.rollback.assert_called_once()
+
+
+# 14. Database failure triggers Cloudinary cleanup
+def test_scan_upload_database_failure_cleans_cloudinary(
+    client, mock_db, monkeypatch
+):
+    async def fake_validate(file):
+        return True
+
+    monkeypatch.setattr(scans, "validate_image", fake_validate)
+    monkeypatch.setattr(
+        scans,
+        "upload_image",
+        lambda file: {
+            "image_url": "https://example.com/test.jpg",
+            "public_id": "recycliq/scans/test-image"
+        }
+    )
+
+    mock_delete = MagicMock(return_value=True)
+    monkeypatch.setattr(scans, "delete_image", mock_delete)
+    mock_db.commit.side_effect = RuntimeError("Database commit failed")
+
+    response = client.post(
+        "/scans/upload",
+        files={
+            "file": ("test.jpg", BytesIO(b"test-image-data"), "image/jpeg")
+        }
+    )
+
+    assert response.status_code == 500
+    mock_db.rollback.assert_called_once()
+    mock_delete.assert_called_once_with("recycliq/scans/test-image")
+
+
+# 15. Cloudinary cleanup failure does not hide the original API error
+def test_scan_upload_cleanup_failure(
+    client, mock_db, monkeypatch
+):
+    async def fake_validate(file):
+        return True
+
+    monkeypatch.setattr(scans, "validate_image", fake_validate)
+    monkeypatch.setattr(
+        scans,
+        "upload_image",
+        lambda file: {
+            "image_url": "https://example.com/test.jpg",
+            "public_id": "recycliq/scans/test-image"
+        }
+    )
+    monkeypatch.setattr(
+        scans,
+        "delete_image",
+        MagicMock(side_effect=RuntimeError("Cloudinary deletion failed"))
+    )
+    mock_db.commit.side_effect = RuntimeError("Database commit failed")
+
+    response = client.post(
+        "/scans/upload",
+        files={
+            "file": ("test.jpg", BytesIO(b"test-image-data"), "image/jpeg")
+        }
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Failed to upload image or create scan."
+    )
+    mock_db.rollback.assert_called_once()
+
+
+# 16. Successful upload does not delete the Cloudinary image
+def test_successful_scan_upload_does_not_delete_image(
+    client, mock_db, monkeypatch
+):
+    scan_id = uuid.uuid4()
+
+    async def fake_validate(file):
+        return True
+
+    monkeypatch.setattr(scans, "validate_image", fake_validate)
+    monkeypatch.setattr(
+        scans,
+        "upload_image",
+        lambda file: {
+            "image_url": "https://example.com/uploaded.jpg",
+            "public_id": "recycliq/scans/test-image"
+        }
+    )
+    mock_delete = MagicMock()
+    monkeypatch.setattr(scans, "delete_image", mock_delete)
+    mock_db.refresh.side_effect = lambda obj: setattr(obj, "id", scan_id)
+
+    response = client.post(
+        "/scans/upload",
+        files={
+            "file": ("test.jpg", BytesIO(b"test-image-data"), "image/jpeg")
+        }
+    )
+
+    assert response.status_code == 201
+    assert response.json()["scan_id"] == str(scan_id)
+    mock_db.commit.assert_called_once()
+    mock_delete.assert_not_called()
+
+# 17. Refresh failure after successful database commit
+def test_scan_upload_refresh_failure_preserves_cloudinary_image(
+    client, mock_db, monkeypatch
+):
+    async def fake_validate(file):
         return True
 
     monkeypatch.setattr(
         scans,
         "validate_image",
-        fake_validate_image
+        fake_validate
     )
 
     monkeypatch.setattr(
         scans,
         "upload_image",
         lambda file: {
-            "image_url": "https://example.com/test.jpg"
+            "image_url": "https://example.com/test.jpg",
+            "public_id": "recycliq/scans/test-image"
         }
     )
 
-    mock_db.commit.side_effect = RuntimeError(
-        "Database commit failed"
+    mock_delete = MagicMock(return_value=True)
+
+    monkeypatch.setattr(
+        scans,
+        "delete_image",
+        mock_delete
+    )
+
+    # Database commit succeeds
+    mock_db.commit.return_value = None
+
+    # Refresh fails after commit
+    mock_db.refresh.side_effect = RuntimeError(
+        "Database refresh failed"
     )
 
     response = client.post(
@@ -462,9 +600,11 @@ def test_scan_upload_database_failure(
 
     assert response.status_code == 500
 
-    assert response.json()["detail"] == (
-        "Failed to upload image or create scan."
-    )
+    # Database commit succeeded
+    mock_db.commit.assert_called_once()
 
-    mock_db.add.assert_called_once()
-    mock_db.rollback.assert_called_once()
+    # Refresh was attempted
+    mock_db.refresh.assert_called_once()
+
+    # Cloudinary image must be preserved
+    mock_delete.assert_not_called()

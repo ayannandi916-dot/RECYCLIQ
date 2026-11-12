@@ -21,6 +21,7 @@ venv/
 .pytest_cache/
 .nyc_output/
 
+
 # IDE
 .vscode/
 .idea/
@@ -34,3 +35,13 @@ Thumbs.db
 
 # Build files
 build/
+
+datasets/
+runs/
+*.pt
+
+# AI datasets and model weights
+datasets/
+runs/
+*.pt
+*.cache

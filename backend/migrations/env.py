@@ -25,13 +25,26 @@ from app.models import (
 config = context.config
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-load_dotenv(BASE_DIR / ".env")
 
-database_url = os.getenv("DATABASE_URL")
+USE_TEST_DATABASE = os.getenv("ALEMBIC_USE_TEST_DB") == "1"
 
-if not database_url:
-    raise ValueError("DATABASE_URL is not configured!")
+if USE_TEST_DATABASE:
+    load_dotenv(BASE_DIR / ".env.test", override=True)
+    database_url = os.getenv("TEST_DATABASE_URL")
 
+    if not database_url:
+        raise ValueError(
+            "TEST_DATABASE_URL is not configured!"
+        )
+else:
+    load_dotenv(BASE_DIR / ".env")
+    database_url = os.getenv("DATABASE_URL")
+
+    if not database_url:
+        raise ValueError(
+            "DATABASE_URL is not configured!"
+        )
+        
 config.set_main_option(
     "sqlalchemy.url",
     database_url.replace("%", "%%")

@@ -125,6 +125,11 @@ def setup_ai_mocks(monkeypatch, mock_db, sample_materials):
     )
 
     mock_db.refresh.side_effect = fake_refresh
+    def fake_add(obj):
+        if isinstance(obj, WasteScan) and getattr(obj, "id", None) is None:
+            obj.id = uuid.uuid4()
+
+    mock_db.add.side_effect = fake_add
 
     def query_side_effect(model):
 
@@ -342,6 +347,11 @@ def test_missing_material_in_database(
          obj.id = uuid.uuid4()
 
     mock_db.refresh.side_effect = fake_refresh
+    def fake_add(obj):
+        if isinstance(obj, WasteScan) and getattr(obj, "id", None) is None:
+            obj.id = uuid.uuid4()
+
+    mock_db.add.side_effect = fake_add
 
     async def fake_validate(file):
         return True
@@ -411,6 +421,11 @@ def test_database_integrity_failure(
     def fake_refresh(obj):
         if isinstance(obj, WasteScan):
             obj.id = scan.id
+    def fake_add(obj):
+        if isinstance(obj, WasteScan) and getattr(obj, "id", None) is None:
+            obj.id = uuid.uuid4()
+
+    mock_db.add.side_effect = fake_add
 
     mock_db.refresh.side_effect = fake_refresh
 
@@ -509,3 +524,42 @@ def test_mark_scan_failed_success(mock_db):
     assert scan.scan_status == "failed"
     mock_db.commit.assert_called_once()
     mock_db.rollback.assert_called_once()
+
+
+# 12. Cloudinary cleanup failure must not hide the original database error
+def test_cloudinary_cleanup_failure_preserves_original_error(
+    client,
+    mock_db,
+    setup_ai_mocks,
+    monkeypatch,
+    caplog
+):
+    monkeypatch.setattr(
+        ai,
+        "upload_image",
+        lambda file: {
+            "image_url": "https://example.com/test.jpg",
+            "public_id": "recycliq/test-image"
+        }
+    )
+
+    delete_mock = MagicMock(
+        side_effect=RuntimeError("Cloudinary deletion failed")
+    )
+    monkeypatch.setattr(ai, "delete_image", delete_mock)
+
+    mock_db.commit.side_effect = IntegrityError(
+        "INSERT INTO waste_scans",
+        {},
+        Exception("Simulated initial database commit failure")
+    )
+
+    response = upload_test_image(client)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Waste detection or database persistence failed."
+    )
+    delete_mock.assert_called_once_with("recycliq/test-image")
+    assert "Failed to clean up Cloudinary image" in caplog.text
+    assert "Simulated initial database commit failure" in caplog.text

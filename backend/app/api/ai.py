@@ -26,7 +26,7 @@ from app.models import (
 )
 
 from app.utils.image_validator import validate_image
-from app.services.cloudinary_service import upload_image
+from app.services.cloudinary_service import upload_image, delete_image
 from app.ai.detector import detect_waste
 from app.services.recommendation_service import (
     generate_recommendations
@@ -111,6 +111,24 @@ async def detect_waste_image(
 
     # Keep the database ID separately from the ORM object.
     scan_id = None
+    image_data = None
+    scan_committed = False
+
+    def cleanup_uncommitted_image():
+        """Delete the Cloudinary image only if its scan was not committed."""
+        if (
+            not scan_committed
+            and image_data
+            and image_data.get("public_id")
+        ):
+            try:
+                delete_image(image_data["public_id"])
+            except Exception:
+                # Cleanup failure must not hide the original API error.
+                logger.exception(
+                    "Failed to clean up Cloudinary image: %s",
+                    image_data["public_id"]
+                )
 
     try:
 
@@ -135,11 +153,12 @@ async def detect_waste_image(
 
         db.add(scan)
         db.commit()
-        db.refresh(scan)
 
-        # Preserve the ID independently.
-        # This remains accessible after transaction rollback.
+        # The initial scan is now durable. Preserve its ID before refresh.
+        scan_committed = True
         scan_id = scan.id
+
+        db.refresh(scan)
 
         # -----------------------------------------
         # 3. Run YOLO inference
@@ -313,6 +332,7 @@ async def detect_waste_image(
 
     except FileNotFoundError:
 
+        cleanup_uncommitted_image()
         mark_scan_failed(db, scan_id)
 
         raise HTTPException(
@@ -322,14 +342,17 @@ async def detect_waste_image(
 
     except ValueError as error:
 
+        cleanup_uncommitted_image()
         mark_scan_failed(db, scan_id)
 
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(error)
         )
 
     except Exception:
+
+        cleanup_uncommitted_image()
 
         logger.exception(
             "Waste detection or database persistence failed."

@@ -18,6 +18,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import selectinload
 
+from app.services.cloudinary_service import upload_image, delete_image
+
 from app.models import (
     User,
     WasteScan,
@@ -40,6 +42,9 @@ async def upload_waste_image(
     await validate_image(file)
 
     image_data = None
+    db_committed = False
+    
+
 
     try:
         image_data = upload_image(file.file)
@@ -52,6 +57,9 @@ async def upload_waste_image(
 
         db.add(new_scan)
         db.commit()
+        
+        db_committed = True
+        print("AFTER COMMIT:", db_committed)
         db.refresh(new_scan)
 
         return {
@@ -64,6 +72,13 @@ async def upload_waste_image(
 
     except Exception:
         db.rollback()
+
+        print("IN EXCEPT:", db_committed)
+        if not db_committed and image_data and image_data.get("public_id"):
+            try:
+                delete_image(image_data["public_id"])
+            except Exception:
+             pass
 
         raise HTTPException(
             status_code=500,

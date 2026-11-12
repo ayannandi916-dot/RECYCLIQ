@@ -2,13 +2,17 @@ import pytest
 
 from app.database import dependencies
 
-
 class MockDBSession:
     def __init__(self):
         self.closed = False
+        self.rolled_back = False
 
     def close(self):
         self.closed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
 
 
 # 1. Database session is created and yielded
@@ -53,7 +57,7 @@ def test_get_db_closes_session(monkeypatch):
         next(generator)
 
     assert mock_db.closed is True
-
+    
 
 # 3. Database session closes when an exception occurs
 def test_get_db_closes_session_on_exception(monkeypatch):
@@ -74,3 +78,4 @@ def test_get_db_closes_session_on_exception(monkeypatch):
         generator.throw(RuntimeError("Database operation failed"))
 
     assert mock_db.closed is True
+    assert mock_db.rolled_back is True

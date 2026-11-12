@@ -51,3 +51,17 @@ def upload_image(image_file, folder="recycliq/scans"):
         "image_url": result["secure_url"],
         "public_id": result["public_id"]
     }
+
+def delete_image(public_id: str) -> bool:
+    """
+    Delete an image from Cloudinary using its public ID.
+    """
+
+    configure_cloudinary()
+
+    result = cloudinary.uploader.destroy(
+        public_id,
+        resource_type="image"
+    )
+
+    return result.get("result") == "ok"

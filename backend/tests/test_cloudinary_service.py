@@ -170,3 +170,73 @@ def test_invalid_cloudinary_response(monkeypatch):
 
     with pytest.raises(KeyError):
         cloudinary_service.upload_image(b"fake-image-data")
+
+# 7. Successful image deletion
+def test_successful_image_deletion(monkeypatch):
+    monkeypatch.setattr(
+        cloudinary_service,
+        "configure_cloudinary",
+        MagicMock()
+    )
+
+    mock_destroy = MagicMock(
+        return_value={"result": "ok"}
+    )
+
+    monkeypatch.setattr(
+        cloudinary_service.cloudinary.uploader,
+        "destroy",
+        mock_destroy
+    )
+
+    result = cloudinary_service.delete_image(
+        "recycliq/scans/test-image"
+    )
+
+    assert result is True
+
+    mock_destroy.assert_called_once_with(
+        "recycliq/scans/test-image",
+        resource_type="image"
+    )
+
+
+# 8. Image not found during deletion
+def test_image_deletion_not_found(monkeypatch):
+    monkeypatch.setattr(
+        cloudinary_service,
+        "configure_cloudinary",
+        MagicMock()
+    )
+
+    monkeypatch.setattr(
+        cloudinary_service.cloudinary.uploader,
+        "destroy",
+        MagicMock(return_value={"result": "not found"})
+    )
+
+    result = cloudinary_service.delete_image(
+        "recycliq/scans/missing-image"
+    )
+
+    assert result is False
+
+
+# 9. Cloudinary deletion failure
+def test_cloudinary_deletion_failure(monkeypatch):
+    monkeypatch.setattr(
+        cloudinary_service,
+        "configure_cloudinary",
+        MagicMock()
+    )
+
+    monkeypatch.setattr(
+        cloudinary_service.cloudinary.uploader,
+        "destroy",
+        MagicMock(side_effect=Exception("Deletion failed"))
+    )
+
+    with pytest.raises(Exception, match="Deletion failed"):
+        cloudinary_service.delete_image(
+            "recycliq/scans/test-image"
+        )
