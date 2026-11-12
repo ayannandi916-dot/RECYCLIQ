@@ -71,7 +71,7 @@ def test_invalid_jwt_signature_rejected(api_client, monkeypatch):
             "sub": str(uuid.uuid4()),
             "role": "user",
         },
-        "incorrect-integration-secret",
+        "incorrect-integration-secret-key-2026",
         algorithm="HS256",
     )
 
@@ -255,7 +255,7 @@ def test_jwt_admin_claim_cannot_elevate_normal_user(
 ):
     monkeypatch.setenv(
         "JWT_SECRET_KEY",
-        "integration-test-secret-key-123456789",
+        "recycliq-integration-test-secret-key-2026",
     )
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
 
