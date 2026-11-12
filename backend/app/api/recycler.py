@@ -39,6 +39,16 @@ from app.services.recycling_centre_service import (
     delete_centre,
 )
 
+from app.schemas.recycling_centre import (
+    RecyclingCentreMaterialsUpdate,
+    RecyclingCentreMaterialResponse,
+)
+
+from app.services.recycling_centre_service import (
+    get_centre_materials,
+    replace_centre_materials,
+)
+
 
 router = APIRouter(prefix="/recycler", tags=["Recycler"])
 
@@ -168,6 +178,45 @@ def edit_application(
     current_user: User = Depends(require_role("user")),
 ):
     return update_application(db, current_user, data)
+
+
+# =========================================================
+# ACCEPTED MATERIALS MANAGEMENT
+# =========================================================
+
+
+@router.get(
+    "/centres/{centre_id}/materials",
+    response_model=list[RecyclingCentreMaterialResponse],
+)
+def list_centre_materials(
+    centre_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("recycler")),
+):
+    return get_centre_materials(
+        db=db,
+        current_user_id=current_user.id,
+        centre_id=centre_id,
+    )
+
+
+@router.put(
+    "/centres/{centre_id}/materials",
+    response_model=list[RecyclingCentreMaterialResponse],
+)
+def update_centre_materials(
+    centre_id: UUID,
+    materials_data: RecyclingCentreMaterialsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("recycler")),
+):
+    return replace_centre_materials(
+        db=db,
+        current_user_id=current_user.id,
+        centre_id=centre_id,
+        material_ids=materials_data.material_ids,
+    )
 
 
 # ADMIN ROUTES

@@ -1,7 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RecyclingCentreCreate(BaseModel):
@@ -50,5 +51,26 @@ class RecyclingCentreResponse(BaseModel):
     contact_number: str | None
     is_active: bool
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class RecyclingCentreMaterialsUpdate(BaseModel):
+    material_ids: list[UUID] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_material_ids(self):
+        if len(self.material_ids) != len(set(self.material_ids)):
+            raise ValueError("Duplicate material IDs are not allowed")
+
+        return self
+
+
+class RecyclingCentreMaterialResponse(BaseModel):
+    id: UUID
+    name: str
+    category: str
+    description: str | None
+    recyclable: bool
+    biodegradable: bool
 
     model_config = ConfigDict(from_attributes=True)
