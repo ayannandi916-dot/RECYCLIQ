@@ -226,3 +226,49 @@ def test_missing_subject_in_token(client, monkeypatch):
     assert response.json()["detail"] == (
         "Invalid authentication token"
     )
+
+# 11. Login rejects excessively long passwords
+def test_login_rejects_password_over_128_characters(client):
+
+    response = client.post(
+        "/auth/login",
+        json={
+            "email": "test@recycliq.com",
+            "password": "A" * 129
+        }
+    )
+
+    assert response.status_code == 422
+
+
+# 12. Registration rolls back on database uniqueness conflict
+def test_registration_integrity_error(
+    client,
+    mock_db
+):
+    from sqlalchemy.exc import IntegrityError
+
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+
+    mock_db.commit.side_effect = IntegrityError(
+        "INSERT INTO users",
+        {},
+        Exception("Unique constraint violation")
+    )
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "name": "Test User",
+            "email": "duplicate@recycliq.com",
+            "password": "TestPassword@123"
+        }
+    )
+
+    assert response.status_code == 409
+
+    mock_db.rollback.assert_called_once()
+
+    assert response.json()["detail"] == (
+        "Email is already registered!"
+    )
