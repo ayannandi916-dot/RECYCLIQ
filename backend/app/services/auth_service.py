@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models import User
 from app.schemas.auth import UserRegister, UserLogin
@@ -33,9 +34,18 @@ def register_user(db: Session, user_data: UserRegister) -> User:
         role="user"
     )
 
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("Email is already registered!")
+
+    except Exception:
+        db.rollback()
+        raise
 
     return new_user
 
@@ -49,9 +59,9 @@ def login_user(db: Session, user_data: UserLogin) -> str:
         User.email == user_data.email
     ).first()
 
-    if not user:
+    if not user or not user.is_active:
         raise ValueError("Invalid email or password!")
-
+   
     if not verify_password(
         user_data.password,
         user.password_hash

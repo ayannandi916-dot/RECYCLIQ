@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime
+from sqlalchemy import String, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base
@@ -39,6 +39,12 @@ class User(Base):
         nullable=False
     )
 
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -46,7 +52,23 @@ class User(Base):
     )
     
     waste_scans = relationship(
-    "WasteScan",
-    back_populates="user",
-    cascade="all, delete-orphan"
+        "WasteScan",
+        back_populates="user",
+        cascade="all, delete-orphan"
     )
+
+    recycling_centres = relationship(
+        "RecyclingCentre",
+        back_populates="owner",
+        passive_deletes=True
+    )
+
+    recycler_application = relationship(
+        "RecyclerApplication",
+        foreign_keys="RecyclerApplication.user_id",
+        back_populates="applicant",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    
