@@ -431,7 +431,7 @@ def test_invalid_coordinates_are_rejected(
         headers=get_auth_headers(recycler),
     )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_invalid_update_coordinates_are_rejected(
@@ -454,7 +454,7 @@ def test_invalid_update_coordinates_are_rejected(
         headers=get_auth_headers(recycler),
     )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 # =========================================================
