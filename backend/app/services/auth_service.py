@@ -59,9 +59,9 @@ def login_user(db: Session, user_data: UserLogin) -> str:
         User.email == user_data.email
     ).first()
 
-    if not user:
+    if not user or not user.is_active:
         raise ValueError("Invalid email or password!")
-
+   
     if not verify_password(
         user_data.password,
         user.password_hash

@@ -345,7 +345,7 @@ def test_duplicate_material_ids_are_rejected(
         headers=get_auth_headers(recycler),
     )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_nonexistent_material_id_is_rejected(
