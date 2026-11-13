@@ -17,7 +17,7 @@ class RecyclingCentreCreate(BaseModel):
     longitude: float = Field(ge=-180, le=180)
 
     contact_number: str | None = Field(default=None, max_length=20)
-    is_active: bool = True
+
 
 
 class RecyclingCentreUpdate(BaseModel):
@@ -32,7 +32,7 @@ class RecyclingCentreUpdate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
 
     contact_number: str | None = Field(default=None, max_length=20)
-    is_active: bool | None = None
+    
 
 
 class RecyclingCentreResponse(BaseModel):
