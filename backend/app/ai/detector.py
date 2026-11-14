@@ -24,18 +24,24 @@ def detect_waste(image_bytes: bytes) -> dict:
     class IDs, confidence scores and bounding boxes.
     """
 
-    if not image_bytes:
-        raise ValueError("Image data is empty.")
+    
 
-    image_array = np.frombuffer(
-        image_bytes,
-        dtype=np.uint8,
-    )
+    if not isinstance(image_bytes, bytes) or not image_bytes:
+        raise ValueError("Image data is empty or invalid.")
 
-    image = cv2.imdecode(
-        image_array,
-        cv2.IMREAD_COLOR,
-    )
+    try:
+        image_array = np.frombuffer(
+            image_bytes,
+            dtype=np.uint8,
+        )
+
+        image = cv2.imdecode(
+            image_array,
+            cv2.IMREAD_COLOR,
+        )
+
+    except (ValueError, TypeError, cv2.error) as exc:
+        raise ValueError("Unable to decode image.") from exc
 
     if image is None:
         raise ValueError("Unable to decode image.")
@@ -112,7 +118,16 @@ def detect_waste(image_bytes: bytes) -> dict:
                 )
 
             # Extract class ID.
-            class_id = int(box.cls[0].item())
+            raw_class_id = float(box.cls[0].item())
+
+            if (
+                not math.isfinite(raw_class_id)
+                or not raw_class_id.is_integer()
+                or raw_class_id < 0
+            ):
+                raise RuntimeError("YOLO returned an invalid class ID.")
+
+            class_id = int(raw_class_id)
 
             # Support both dictionary and list class names.
             class_names = model.names
@@ -150,15 +165,27 @@ def detect_waste(image_bytes: bytes) -> dict:
                     "YOLO returned an invalid confidence score."
                 )
 
+            rounded_coordinates = [
+                round(value, 2)
+                for value in coordinates
+            ]
+
+            x1, y1, x2, y2 = rounded_coordinates
+
+            if not (x1 < x2 and y1 < y2):
+                raise RuntimeError(
+                    "YOLO returned an invalid bounding box after rounding."
+                )
+
             detections.append({
                 "class_id": class_id,
                 "label": class_name,
                 "confidence": round(confidence, 4),
                 "bounding_box": {
-                    "x1": round(x1, 2),
-                    "y1": round(y1, 2),
-                    "x2": round(x2, 2),
-                    "y2": round(y2, 2),
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
                 },
             })
 

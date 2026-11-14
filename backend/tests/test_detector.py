@@ -314,3 +314,137 @@ def test_unsupported_class_name_mapping(monkeypatch):
 
     with pytest.raises(RuntimeError, match="unsupported class-name mapping"):
         detector.detect_waste(create_test_image())
+
+
+@pytest.mark.parametrize(
+    "class_id",
+    [
+        1.5,
+        -1,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_invalid_class_id_values(monkeypatch, class_id):
+    boxes = [
+        FakeBox([10, 20, 100, 120], class_id, 0.90)
+    ]
+    model = FakeModel(boxes)
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    with pytest.raises(RuntimeError, match="invalid class ID"):
+        detector.detect_waste(create_test_image())
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    [
+        [100.001, 120, 100.004, 150],
+        [100, 120.001, 150, 120.004],
+    ],
+)
+def test_bounding_box_invalid_after_rounding(
+    monkeypatch,
+    coordinates,
+):
+    boxes = [
+        FakeBox(coordinates, 0, 0.90)
+    ]
+    model = FakeModel(boxes)
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="invalid bounding box after rounding",
+    ):
+        detector.detect_waste(create_test_image())
+
+
+def test_none_inference_results(monkeypatch):
+    model = FakeModel(boxes=[])
+    model.predict.return_value = None
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="no inference results",
+    ):
+        detector.detect_waste(create_test_image())
+
+
+def test_none_inference_result_item(monkeypatch):
+    model = FakeModel(boxes=[])
+    model.predict.return_value = [None]
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="invalid inference result",
+    ):
+        detector.detect_waste(create_test_image())
+
+
+def test_result_without_boxes(monkeypatch):
+    model = FakeModel(boxes=[])
+    model.predict.return_value = [
+        FakeResult(boxes=None)
+    ]
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    result = detector.detect_waste(create_test_image())
+
+    assert result["total_detections"] == 0
+    assert result["detections"] == []
+
+
+
+@pytest.mark.parametrize(
+    "image_input",
+    [
+        None,
+        "invalid",
+        123,
+        [],
+    ],
+)
+def test_invalid_image_input_type(image_input):
+    with pytest.raises(ValueError, match="Image data"):
+        detector.detect_waste(image_input)
+
+
+def test_image_decode_exception(monkeypatch):
+    monkeypatch.setattr(
+        detector.cv2,
+        "imdecode",
+        MagicMock(side_effect=cv2.error("Decode failure")),
+    )
+
+    with pytest.raises(ValueError, match="Unable to decode image"):
+        detector.detect_waste(b"some image data")
+        
