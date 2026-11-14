@@ -242,3 +242,75 @@ def test_model_names_as_list(monkeypatch):
     result = detector.detect_waste(create_test_image())
 
     assert result["detections"][0]["label"] == "CARDBOARD"
+
+
+# 10. Empty model results
+def test_empty_model_results(monkeypatch):
+    model = FakeModel(boxes=[])
+    model.predict.return_value = []
+
+    monkeypatch.setattr(detector, "get_model", lambda: model)
+
+    with pytest.raises(RuntimeError, match="no inference results"):
+        detector.detect_waste(create_test_image())
+
+
+# 11. Invalid class ID
+def test_invalid_class_id(monkeypatch):
+    boxes = [FakeBox([10, 20, 100, 120], 99, 0.90)]
+    model = FakeModel(boxes, names={0: "PLASTIC"})
+
+    monkeypatch.setattr(detector, "get_model", lambda: model)
+
+    with pytest.raises(RuntimeError, match="Invalid YOLO class ID"):
+        detector.detect_waste(create_test_image())
+
+
+# 12. Invalid confidence values
+@pytest.mark.parametrize("confidence", [
+    float("nan"),
+    float("inf"),
+    -0.1,
+    1.1,
+])
+def test_invalid_confidence(monkeypatch, confidence):
+    boxes = [FakeBox([10, 20, 100, 120], 0, confidence)]
+    model = FakeModel(boxes)
+
+    monkeypatch.setattr(detector, "get_model", lambda: model)
+
+    with pytest.raises(RuntimeError, match="invalid confidence"):
+        detector.detect_waste(create_test_image())
+
+
+# 13. Invalid bounding-box coordinates
+@pytest.mark.parametrize("coordinates", [
+    [100, 100, 50, 150],       # Reversed X coordinates
+    [50, 150, 100, 100],       # Reversed Y coordinates
+    [-10, 20, 100, 120],       # Negative coordinate
+    [10, 20, 700, 120],        # Beyond image width
+    [10, 20, 100, 500],        # Beyond image height
+    [10, 20, float("nan"), 120],
+    [10, 20, float("inf"), 120],
+    [10, 20, 100],             # Incorrect coordinate count
+])
+def test_invalid_bounding_box(monkeypatch, coordinates):
+    boxes = [FakeBox(coordinates, 0, 0.90)]
+    model = FakeModel(boxes)
+
+    monkeypatch.setattr(detector, "get_model", lambda: model)
+
+    with pytest.raises(RuntimeError):
+        detector.detect_waste(create_test_image())
+
+
+# 14. Unsupported class-name mapping
+def test_unsupported_class_name_mapping(monkeypatch):
+    boxes = [FakeBox([10, 20, 100, 120], 0, 0.90)]
+    model = FakeModel(boxes)
+    model.names = "invalid_mapping"
+
+    monkeypatch.setattr(detector, "get_model", lambda: model)
+
+    with pytest.raises(RuntimeError, match="unsupported class-name mapping"):
+        detector.detect_waste(create_test_image())

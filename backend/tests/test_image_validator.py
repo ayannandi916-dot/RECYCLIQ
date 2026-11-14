@@ -6,19 +6,21 @@ from PIL import Image
 from fastapi import HTTPException
 from fastapi import UploadFile
 
-from app.utils.image_validator import validate_image, MAX_FILE_SIZE
+from app.utils.image_validator import (
+    validate_image,
+    MAX_FILE_SIZE,
+    MAX_IMAGE_PIXELS,
+)
 
-
-def create_image(format="JPEG"):
+def create_image(format="JPEG", size=(100, 100)):
     """Generate an in-memory test image."""
-    image = Image.new("RGB", (100, 100), color="red")
+    image = Image.new("RGB", size, color="red")
 
     buffer = BytesIO()
     image.save(buffer, format=format)
 
     buffer.seek(0)
     return buffer.getvalue()
-
 
 def create_upload_file(content, filename="test.jpg"):
     """Create a FastAPI UploadFile for testing."""
@@ -132,6 +134,72 @@ def test_file_pointer_resets():
     file = create_upload_file(content)
 
     assert run_validation(file) is True
+
+    remaining_content = asyncio.run(file.read())
+
+    assert remaining_content == content
+
+# 10. Image exceeding maximum pixel count
+def test_image_exceeds_maximum_pixels():
+    content = create_image(
+        "JPEG",
+        size=(5001, 5000),
+    )
+
+    file = create_upload_file(content)
+
+    with pytest.raises(HTTPException) as exc:
+        run_validation(file)
+
+    assert exc.value.status_code == 413
+    assert exc.value.detail == (
+        "Image dimensions must not exceed 25 megapixels."
+    )
+
+
+# 11. Image exactly at maximum pixel count
+def test_image_at_maximum_pixel_limit():
+    content = create_image(
+        "JPEG",
+        size=(5000, 5000),
+    )
+
+    file = create_upload_file(content)
+
+    assert run_validation(file) is True
+
+
+# 12. Image below maximum pixel count
+def test_image_below_maximum_pixel_limit():
+    content = create_image(
+        "JPEG",
+        size=(4999, 5000),
+    )
+
+    file = create_upload_file(content)
+
+    assert run_validation(file) is True
+
+
+# 13. MIME type spoofing
+def test_mime_type_does_not_override_actual_format():
+    content = create_image("JPEG")
+
+    file = UploadFile(
+        filename="fake.png",
+        file=BytesIO(content),
+    )
+
+    assert run_validation(file) is True
+
+
+# 14. File pointer resets after oversized upload
+def test_file_pointer_resets_after_oversized_upload():
+    content = b"x" * (MAX_FILE_SIZE + 1)
+    file = create_upload_file(content)
+
+    with pytest.raises(HTTPException):
+        run_validation(file)
 
     remaining_content = asyncio.run(file.read())
 

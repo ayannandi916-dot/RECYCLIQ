@@ -39,13 +39,17 @@ def register_user(db: Session, user_data: UserRegister) -> User:
         db.commit()
         db.refresh(new_user)
 
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise ValueError("Email is already registered!")
+        raise ValueError(
+            "Email is already registered!"
+        ) from exc
 
     except Exception:
         db.rollback()
         raise
+        
+
 
     return new_user
 

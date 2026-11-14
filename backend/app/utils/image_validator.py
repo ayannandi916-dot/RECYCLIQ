@@ -1,62 +1,89 @@
 from io import BytesIO
+import warnings
 
 from PIL import Image, UnidentifiedImageError
 from fastapi import UploadFile, HTTPException
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_PIXELS = 25_000_000  # 25 Megapixels
 
 ALLOWED_FORMATS = {
     "JPEG",
     "PNG",
-    "WEBP"
+    "WEBP",
 }
 
 
 async def validate_image(file: UploadFile):
     """
-    Validate uploaded image size, format and integrity.
+    Validate uploaded image size, format, dimensions and integrity.
     """
 
     if not file.filename:
         raise HTTPException(
             status_code=400,
-            detail="Filename is required."
+            detail="Filename is required.",
         )
 
-    # Read image contents
-    contents = await file.read()
+    contents = await file.read(MAX_FILE_SIZE + 1)
 
-    # Reset file pointer for subsequent upload
     await file.seek(0)
 
-    # Check file size
-    if len(contents) == 0:
+    if not contents:
         raise HTTPException(
             status_code=400,
-            detail="Uploaded file is empty."
+            detail="Uploaded file is empty.",
         )
 
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail="Image size must not exceed 5 MB."
+            detail="Image size must not exceed 5 MB.",
         )
 
-    # Verify actual image format
     try:
-        with Image.open(BytesIO(contents)) as image:
-            image.verify()
+        with warnings.catch_warnings():
+            warnings.simplefilter(
+                "error",
+                Image.DecompressionBombWarning,
+            )
 
-            if image.format not in ALLOWED_FORMATS:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Only JPEG, PNG and WEBP images are allowed."
-                )
+            with Image.open(BytesIO(contents)) as image:
 
-    except (UnidentifiedImageError, OSError):
+                if image.format not in ALLOWED_FORMATS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Only JPEG, PNG and WEBP images are allowed.",
+                    )
+
+                width, height = image.size
+
+                if width <= 0 or height <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid image dimensions.",
+                    )
+
+                if width * height > MAX_IMAGE_PIXELS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Image dimensions must not exceed 25 megapixels.",
+                    )
+
+                image.verify()
+
+    except HTTPException:
+        raise
+
+    except (
+        UnidentifiedImageError,
+        OSError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Invalid or corrupted image."
+            detail="Invalid or corrupted image.",
         )
 
     return True

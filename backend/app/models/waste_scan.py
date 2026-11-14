@@ -6,7 +6,8 @@ from sqlalchemy import (
     Text,
     DateTime,
     ForeignKey,
-    CheckConstraint
+    CheckConstraint,
+    Index,
 )
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -35,7 +36,7 @@ class WasteScan(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        
     )
 
     image_url: Mapped[str] = mapped_column(
@@ -62,3 +63,12 @@ class WasteScan(Base):
         back_populates="scan",
         cascade="all, delete-orphan"
     )
+
+# Composite index for user scan history
+Index(
+    "ix_waste_scans_user_created_at_id",
+    WasteScan.user_id,
+    WasteScan.created_at.desc(),
+    WasteScan.id.asc(),
+)
+    

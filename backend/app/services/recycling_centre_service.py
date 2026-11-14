@@ -42,11 +42,13 @@ def get_my_centres(
     statement = (
         select(RecyclingCentre)
         .where(RecyclingCentre.owner_id == current_user_id)
-        .order_by(RecyclingCentre.created_at.desc())
+        .order_by(
+            RecyclingCentre.created_at.desc(),
+            RecyclingCentre.id.asc(),
+        )
     )
 
     return db.scalars(statement).all()
-
 
 def get_centre(
     db: Session,
@@ -138,6 +140,13 @@ def replace_centre_materials(
     # Verify centre ownership
     get_centre(db, current_user_id, centre_id)
 
+    # Reject duplicate material IDs
+    if len(material_ids) != len(set(material_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate material IDs are not allowed",
+        )
+
     # Validate all material IDs before modifying anything
     if material_ids:
         statement = select(Material.id).where(
@@ -179,7 +188,6 @@ def replace_centre_materials(
         ]
 
         db.add_all(new_mappings)
-
         db.commit()
 
     except Exception:
