@@ -101,7 +101,7 @@ def sample_materials():
 
 
 @pytest.fixture
-def mock_db(current_user, sample_materials):
+def mock_db(current_user, sample_materials, monkeypatch):
     db = MagicMock()
 
     scan = SimpleNamespace(
@@ -134,6 +134,9 @@ def mock_db(current_user, sample_materials):
     db.query.side_effect = query_side_effect
 
     db.refresh.side_effect = lambda obj: None
+    db.close.return_value = None
+
+    monkeypatch.setattr(scan_service, "SessionLocal", lambda: db)
 
     return db
 
@@ -183,8 +186,7 @@ def test_successful_scan(
     response = asyncio.run(
         scan_service.process_scan(
             image_bytes=b"test-image-data",
-            current_user=current_user,
-            db=mock_db,
+            user_id=current_user.id,
         )
     )
 
@@ -220,8 +222,7 @@ def test_scan_with_no_detections(
     response = asyncio.run(
         scan_service.process_scan(
             image_bytes=b"test-image-data",
-            current_user=current_user,
-            db=mock_db,
+            user_id=current_user.id,
         )
     )
 
@@ -242,8 +243,7 @@ def test_material_classification(
     response = asyncio.run(
         scan_service.process_scan(
             image_bytes=b"test-image-data",
-            current_user=current_user,
-            db=mock_db,
+            user_id=current_user.id,
         )
     )
 
@@ -278,8 +278,7 @@ def test_recommendations_are_persisted(
     asyncio.run(
         scan_service.process_scan(
             image_bytes=b"test-image-data",
-            current_user=current_user,
-            db=mock_db,
+            user_id=current_user.id,
         )
     )
 
@@ -298,6 +297,24 @@ def test_recommendations_are_persisted(
 
     assert recommendations[0].title == "Reuse Container"
     assert recommendations[1].title == "Recycle Plastic"
+
+    detected_objects = [
+        obj
+        for obj in added_objects
+        if isinstance(obj, ScanObject)
+    ]
+
+    assert len(detected_objects) == 1
+
+    assert all(
+        recommendation.scan_object_id == detected_objects[0].id
+        for recommendation in recommendations
+    )
+
+    assert all(
+        recommendation.estimated_co2_saved is None
+        for recommendation in recommendations
+    )
 
 
 # --------------------------------------------------
@@ -330,9 +347,8 @@ def test_cloudinary_upload_failure(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     mock_db.add.assert_not_called()
@@ -366,9 +382,8 @@ def test_database_commit_failure_cleans_cloudinary(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     mock_db.rollback.assert_called_once()
@@ -408,9 +423,8 @@ def test_detection_failure_marks_scan_failed(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     assert exc_info.value.status_code == 503
@@ -442,9 +456,8 @@ def test_final_persistence_failure_marks_scan_failed(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     mock_db.rollback.assert_called()
@@ -477,9 +490,8 @@ def test_unknown_yolo_class_fails_scan(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     mock_db.rollback.assert_called()
@@ -503,9 +515,8 @@ def test_invalid_image_data_returns_422(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"invalid-image",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     assert exc_info.value.status_code == 422
@@ -535,9 +546,8 @@ def test_missing_material_in_database(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     mock_db.rollback.assert_called()
@@ -615,9 +625,8 @@ def test_cloudinary_cleanup_failure_preserves_original_error(
         asyncio.run(
             scan_service.process_scan(
                 image_bytes=b"test-image-data",
-                current_user=current_user,
-                db=mock_db,
-            )
+                user_id=current_user.id,
+                )
         )
 
     assert "Failed to delete uncommitted Cloudinary image" in caplog.text

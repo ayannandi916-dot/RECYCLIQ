@@ -1,4 +1,3 @@
-
 import logging
 from uuid import UUID
 
@@ -11,19 +10,16 @@ from fastapi import (
     status,
     Query,
 )
-
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_user
 from app.database.dependencies import get_db
-
 from app.models import (
     User,
     WasteScan,
     ScanObject,
     ScanObjectMaterial,
 )
-
 from app.utils.image_validator import validate_image
 from app.services.scan_service import process_scan
 
@@ -32,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/scans",
-    tags=["Waste Scanning"]
+    tags=["Waste Scanning"],
 )
 
 
@@ -40,36 +36,33 @@ router = APIRouter(
 async def upload_waste_image(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     await validate_image(file)
-
     image_bytes = await file.read()
 
     try:
         return await process_scan(
             image_bytes=image_bytes,
-            current_user=current_user,
-            db=db,
+            user_id=current_user.id,
         )
 
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Scan upload and processing failed.")
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Scan processing failed.",
-        )
+        ) from exc
+
 
 @router.get("/history")
 def get_scan_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=50)
+    limit: int = Query(10, ge=1, le=50),
 ):
     offset = (page - 1) * limit
 
@@ -100,31 +93,24 @@ def get_scan_history(
                 "scan_id": str(scan.id),
                 "image_url": scan.image_url,
                 "scan_status": scan.scan_status,
-                "created_at": scan.created_at
+                "created_at": scan.created_at,
             }
             for scan in scans
-        ]
+        ],
     }
+
 
 @router.get("/{scan_id}")
 def get_scan_details(
     scan_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
-    Retrieve complete scan details including:
-    - Detected objects
-    - Material classifications
-    - Recycling recommendations
-
+    Retrieve complete scan details including detected objects,
+    material classifications and recycling recommendations.
     Users can only access their own scans.
     """
-
-    # -----------------------------------------
-    # 1. Retrieve scan with related records
-    # -----------------------------------------
-
     scan = (
         db.query(WasteScan)
         .options(
@@ -135,44 +121,32 @@ def get_scan_details(
             ).selectinload(
                 ScanObjectMaterial.material
             ),
-
             selectinload(
                 WasteScan.detected_objects
             ).selectinload(
                 ScanObject.recommendations
-            )
+            ),
         )
         .filter(
             WasteScan.id == scan_id,
-            WasteScan.user_id == current_user.id
+            WasteScan.user_id == current_user.id,
         )
         .first()
     )
 
-    # -----------------------------------------
-    # 2. Check scan existence and ownership
-    # -----------------------------------------
-
     if scan is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Scan not found."
+            detail="Scan not found.",
         )
-
-    # -----------------------------------------
-    # 3. Serialize detected objects
-    # -----------------------------------------
 
     detected_objects = []
 
     for obj in scan.detected_objects:
-
         classifications = []
 
         for classification in obj.material_classifications:
-
             material = classification.material
-
             classifications.append({
                 "material_id": str(material.id),
                 "material_name": material.name,
@@ -181,13 +155,12 @@ def get_scan_details(
                 "biodegradable": material.biodegradable,
                 "confidence_score": classification.confidence_score,
                 "quantity_estimate": classification.quantity_estimate,
-                "quantity_unit": classification.quantity_unit
+                "quantity_unit": classification.quantity_unit,
             })
 
         recommendations = []
 
         for recommendation in obj.recommendations:
-
             recommendations.append({
                 "recommendation_id": str(recommendation.id),
                 "type": recommendation.recommendation_type,
@@ -195,7 +168,7 @@ def get_scan_details(
                 "description": recommendation.description,
                 "difficulty": recommendation.difficulty_level,
                 "estimated_co2_saved": recommendation.estimated_co2_saved,
-                "created_at": recommendation.created_at.isoformat()
+                "created_at": recommendation.created_at.isoformat(),
             })
 
         detected_objects.append({
@@ -205,12 +178,8 @@ def get_scan_details(
             "bounding_box": obj.bounding_box,
             "created_at": obj.created_at.isoformat(),
             "materials": classifications,
-            "recommendations": recommendations
+            "recommendations": recommendations,
         })
-
-    # -----------------------------------------
-    # 4. Return complete scan
-    # -----------------------------------------
 
     return {
         "message": "Scan details retrieved successfully.",
@@ -225,6 +194,6 @@ def get_scan_details(
                 len(obj["recommendations"])
                 for obj in detected_objects
             ),
-            "detected_objects": detected_objects
-        }
+            "detected_objects": detected_objects,
+        },
     }

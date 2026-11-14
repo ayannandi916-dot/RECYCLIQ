@@ -1,0 +1,106 @@
+{
+  "model": "C:\\Users\\Ayan\\Desktop\\RECYCLIQ\\runs\\runs\\recycliq\\yolo11n_100ep\\weights\\best.pt",
+  "dataset_yaml": "C:\\Users\\Ayan\\Desktop\\RECYCLIQ\\backend\\datasets\\waste\\cleaned\\detection\\data.yaml",
+  "split": "valid",
+  "image_size": 640,
+  "device": "cpu",
+  "dataset_audit": {
+    "train_images": 3536,
+    "train_label_files": 3536,
+    "train_readable_images": 3536,
+    "class_0": 19019,
+    "train_annotations": 23512,
+    "annotations": 34082,
+    "class_4": 2168,
+    "class_2": 2407,
+    "class_3": 3820,
+    "class_5": 3950,
+    "class_1": 2718,
+    "valid_images": 1008,
+    "valid_label_files": 1008,
+    "valid_readable_images": 1008,
+    "valid_annotations": 7284,
+    "test_images": 505,
+    "test_label_files": 505,
+    "test_readable_images": 505,
+    "test_annotations": 3286
+  },
+  "fixed_threshold_metrics": {
+    "images": 1008,
+    "confidence_threshold": 0.25,
+    "nms_iou_threshold": 0.7,
+    "matching_iou_threshold": 0.5,
+    "overall": {
+      "tp": 3604,
+      "fp": 1386,
+      "fn": 3680,
+      "precision": 0.7222444889779559,
+      "recall": 0.49478308621636463,
+      "f1": 0.5872576177285319
+    },
+    "per_class": {
+      "BIODEGRADABLE": {
+        "tp": 1940,
+        "fp": 693,
+        "fn": 2510,
+        "precision": 0.7368021268515001,
+        "recall": 0.43595505617977526,
+        "f1": 0.5477904842580827
+      },
+      "CARDBOARD": {
+        "tp": 258,
+        "fp": 116,
+        "fn": 193,
+        "precision": 0.6898395721925134,
+        "recall": 0.5720620842572062,
+        "f1": 0.6254545454545455
+      },
+      "GLASS": {
+        "tp": 325,
+        "fp": 88,
+        "fn": 107,
+        "precision": 0.7869249394673123,
+        "recall": 0.7523148148148148,
+        "f1": 0.7692307692307692
+      },
+      "METAL": {
+        "tp": 522,
+        "fp": 225,
+        "fn": 267,
+        "precision": 0.6987951807228916,
+        "recall": 0.6615969581749049,
+        "f1": 0.6796875000000001
+      },
+      "PAPER": {
+        "tp": 151,
+        "fp": 69,
+        "fn": 196,
+        "precision": 0.6863636363636364,
+        "recall": 0.43515850144092216,
+        "f1": 0.5326278659611993
+      },
+      "PLASTIC": {
+        "tp": 408,
+        "fp": 195,
+        "fn": 407,
+        "precision": 0.6766169154228856,
+        "recall": 0.5006134969325153,
+        "f1": 0.5754583921015515
+      }
+    }
+  },
+  "ultralytics_metrics": {
+    "precision": 0.6934715745498297,
+    "recall": 0.5659475699373127,
+    "map50": 0.6221888749437935,
+    "map50_95": 0.4401890052785628,
+    "per_class_map50_95": [
+      0.2627458759715972,
+      0.4712179639729257,
+      0.6358134905304846,
+      0.46960876931091483,
+      0.4116358251906487,
+      0.39011210669480556
+    ]
+  }
+}

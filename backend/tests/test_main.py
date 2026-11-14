@@ -196,3 +196,110 @@ def test_database_health_does_not_expose_exception(
     assert "Sensitive database connection details" not in (
         response.text
     )
+
+
+# E7.5: readiness and model startup warm-up
+def test_readiness_check_success(monkeypatch):
+    mock_model = MagicMock()
+    database_probe = MagicMock()
+
+    monkeypatch.setattr(main, "_check_database_connection", database_probe)
+    monkeypatch.setattr(main, "get_model", MagicMock(return_value=mock_model))
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "application": "RECYCLIQ",
+        "database": "connected",
+        "model": "loaded",
+    }
+    database_probe.assert_called_once()
+
+
+def test_readiness_check_returns_503_when_model_unavailable(monkeypatch):
+    monkeypatch.setattr(main, "_check_database_connection", MagicMock())
+    monkeypatch.setattr(
+        main,
+        "get_model",
+        MagicMock(side_effect=RuntimeError("model load failure")),
+    )
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Application dependencies are not ready."
+    }
+    assert "model load failure" not in response.text
+
+
+def test_readiness_check_returns_503_when_database_unavailable(monkeypatch):
+    database_probe = MagicMock(
+        side_effect=RuntimeError("database unavailable")
+    )
+    model_getter = MagicMock()
+
+    monkeypatch.setattr(main, "_check_database_connection", database_probe)
+    monkeypatch.setattr(main, "get_model", model_getter)
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    model_getter.assert_not_called()
+
+
+def test_startup_warmup_runs_when_enabled(monkeypatch):
+    mock_engine = MagicMock()
+    warmup = MagicMock()
+
+    monkeypatch.setattr(main, "engine", mock_engine)
+    monkeypatch.setattr(main, "_startup_warmup_enabled", lambda: True)
+    monkeypatch.setattr(main, "warmup_model", warmup)
+
+    async def run_test():
+        async with main.lifespan(app):
+            pass
+
+    anyio.run(run_test)
+
+    warmup.assert_called_once()
+    mock_engine.dispose.assert_called_once()
+
+
+def test_startup_warmup_is_skipped_by_default(monkeypatch):
+    mock_engine = MagicMock()
+    warmup = MagicMock()
+
+    monkeypatch.setattr(main, "engine", mock_engine)
+    monkeypatch.setattr(main, "_startup_warmup_enabled", lambda: False)
+    monkeypatch.setattr(main, "warmup_model", warmup)
+
+    async def run_test():
+        async with main.lifespan(app):
+            pass
+
+    anyio.run(run_test)
+
+    warmup.assert_not_called()
+    mock_engine.dispose.assert_called_once()
+
+
+def test_startup_warmup_failure_aborts_startup_and_disposes_engine(monkeypatch):
+    mock_engine = MagicMock()
+    warmup = MagicMock(side_effect=RuntimeError("warm-up failed"))
+
+    monkeypatch.setattr(main, "engine", mock_engine)
+    monkeypatch.setattr(main, "_startup_warmup_enabled", lambda: True)
+    monkeypatch.setattr(main, "warmup_model", warmup)
+
+    async def run_test():
+        with pytest.raises(RuntimeError, match="warm-up failed"):
+            async with main.lifespan(app):
+                pass
+
+    anyio.run(run_test)
+
+    warmup.assert_called_once()
+    mock_engine.dispose.assert_called_once()

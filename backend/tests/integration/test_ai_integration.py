@@ -52,6 +52,20 @@ def ai_client(db_session, ai_user, monkeypatch):
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_current_user] = override_user
 
+    # Make the scan worker use the integration-test database session.
+    monkeypatch.setattr(
+        scan_service,
+        "SessionLocal",
+        lambda: db_session,
+    )
+
+# The scan worker must not close the fixture-owned session.
+    monkeypatch.setattr(
+        db_session,
+        "close",
+        lambda: None,
+    )
+
     # Generate a valid in-memory JPEG.
     image = Image.new("RGB", (100, 100), color="red")
     buffer = BytesIO()
@@ -537,3 +551,118 @@ def test_ai_detection_failure_marks_scan_failed(
 
     assert len(new_scans) == 1
     assert new_scans[0].scan_status == "failed"
+
+def test_multiple_detected_objects_receive_independent_recommendations(
+    ai_client,
+    ai_materials,
+    db_session,
+    monkeypatch,
+):
+    from app.services.recommendation_service import (
+        generate_recommendations,
+    )
+
+    # Use the actual recommendation engine instead of the fixture mock.
+    monkeypatch.setattr(
+        scan_service,
+        "generate_recommendations",
+        generate_recommendations,
+    )
+
+    # Simulate two different detected materials.
+    monkeypatch.setattr(
+        scan_service,
+        "detect_waste",
+        lambda image: {
+            "image_width": 100,
+            "image_height": 100,
+            "detections": [
+                {
+                    "class_id": 5,
+                    "label": "PLASTIC",
+                    "confidence": 0.95,
+                    "bounding_box": {
+                        "x1": 10,
+                        "y1": 20,
+                        "x2": 80,
+                        "y2": 90,
+                    },
+                },
+                {
+                    "class_id": 4,
+                    "label": "PAPER",
+                    "confidence": 0.90,
+                    "bounding_box": {
+                        "x1": 20,
+                        "y1": 30,
+                        "x2": 70,
+                        "y2": 80,
+                    },
+                },
+            ],
+        },
+    )
+
+    client, image_bytes = ai_client
+
+    response = client.post(
+        "/scans/upload",
+        files={
+            "file": (
+                "multiple-waste.jpg",
+                BytesIO(image_bytes),
+                "image/jpeg",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["scan_status"] == "completed"
+    assert data["total_detections"] == 2
+
+    scan_id = uuid.UUID(data["scan_id"])
+
+    detected_objects = (
+        db_session.query(ScanObject)
+        .filter(ScanObject.scan_id == scan_id)
+        .all()
+    )
+
+    assert len(detected_objects) == 2
+
+    for detected_object in detected_objects:
+        recommendations = (
+            db_session.query(Recommendation)
+            .filter(
+                Recommendation.scan_object_id == detected_object.id
+            )
+            .all()
+        )
+
+        assert len(recommendations) == 2
+
+        assert all(
+            recommendation.estimated_co2_saved is None
+            for recommendation in recommendations
+        )
+
+        assert all(
+            recommendation.scan_object_id == detected_object.id
+            for recommendation in recommendations
+        )
+
+    # Each detected object must have its own recommendation records.
+    first_ids = {
+        recommendation.id
+        for recommendation in detected_objects[0].recommendations
+    }
+
+    second_ids = {
+        recommendation.id
+        for recommendation in detected_objects[1].recommendations
+    }
+
+    assert first_ids.isdisjoint(second_ids)

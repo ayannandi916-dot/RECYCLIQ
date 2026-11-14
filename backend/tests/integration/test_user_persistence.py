@@ -1648,3 +1648,79 @@ def test_deleting_recycler_with_owned_centres_is_restricted(
 
     assert db_session.get(User, recycler_id) is not None
     assert db_session.get(RecyclingCentre, centre_id) is not None
+
+
+def test_multiple_recommendations_persist_for_one_detected_object(
+    db_session
+):
+    """Verify multiple recommendations persist for one detected object."""
+
+    detected_object = create_detected_object(db_session)
+
+    recommendations = [
+        Recommendation(
+            scan_object_id=detected_object.id,
+            recommendation_type="reuse",
+            title="Reuse Plastic Container",
+            description="Reuse the container for suitable storage.",
+            difficulty_level="easy",
+            estimated_co2_saved=None,
+        ),
+        Recommendation(
+            scan_object_id=detected_object.id,
+            recommendation_type="recycle",
+            title="Recycle Plastic Waste",
+            description="Send accepted plastic to a recycling facility.",
+            difficulty_level="easy",
+            estimated_co2_saved=None,
+        ),
+    ]
+
+    db_session.add_all(recommendations)
+    db_session.commit()
+    db_session.refresh(detected_object)
+
+    stored_recommendations = db_session.execute(
+        select(Recommendation).where(
+            Recommendation.scan_object_id == detected_object.id
+        )
+    ).scalars().all()
+
+    assert len(stored_recommendations) == 2
+
+    assert {
+        recommendation.title
+        for recommendation in stored_recommendations
+    } == {
+        "Reuse Plastic Container",
+        "Recycle Plastic Waste",
+    }
+
+    assert all(
+        recommendation.estimated_co2_saved is None
+        for recommendation in stored_recommendations
+    )
+
+    assert len(detected_object.recommendations) == 2
+
+
+def test_recommendations_cannot_reference_missing_detected_object(
+    db_session
+):
+    """Verify recommendation foreign keys reject nonexistent objects."""
+
+    recommendation = Recommendation(
+        scan_object_id=uuid.uuid4(),
+        recommendation_type="reuse",
+        title="Invalid Object Recommendation",
+        description="This object does not exist.",
+        difficulty_level="easy",
+        estimated_co2_saved=None,
+    )
+
+    db_session.add(recommendation)
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+    db_session.rollback()
