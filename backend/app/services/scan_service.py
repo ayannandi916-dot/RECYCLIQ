@@ -17,20 +17,14 @@ from app.models import (
 
 from app.services.cloudinary_service import upload_image, delete_image
 from app.services.recommendation_service import generate_recommendations
+from app.services.material_classifier import MATERIAL_MAPPING, classify_detections
+from app.services.material_service import resolve_materials_for_detections
 from app.ai.detector import detect_waste
 
 
 logger = logging.getLogger(__name__)
 
 
-MATERIAL_MAPPING = {
-    "BIODEGRADABLE": "Biodegradable",
-    "CARDBOARD": "Cardboard",
-    "GLASS": "Glass",
-    "METAL": "Metal",
-    "PAPER": "Paper",
-    "PLASTIC": "Plastic",
-}
 
 
 def mark_scan_failed(db: Session, scan_id):
@@ -161,54 +155,34 @@ async def process_scan(
 
         detections = result["detections"]
 
-        # 4. Fetch materials in one query.
+        # 4. Validate and classify detections, then resolve only the
+        #    material records actually needed for this scan.
 
-        material_names = set(MATERIAL_MAPPING.values())
+        try:
+            classified_detections = classify_detections(detections)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
 
-        materials = (
-            db.query(Material)
-            .filter(Material.name.in_(material_names))
-            .all()
+        material_lookup = resolve_materials_for_detections(
+            db, classified_detections
         )
-
-        material_lookup = {
-            material.name: material
-            for material in materials
-        }
-
-        missing_materials = (
-            material_names - set(material_lookup.keys())
-        )
-
-        if missing_materials:
-            raise RuntimeError(
-                "Missing materials in database: "
-                + ", ".join(sorted(missing_materials))
-            )
 
         # 5. Persist detected objects, classifications
         #    and recommendations.
 
         saved_detections = []
 
-        for detection in detections:
+        for detection, classified in zip(detections, classified_detections):
 
-            object_label = detection["label"].upper()
-
-            material_name = MATERIAL_MAPPING.get(object_label)
-
-            if material_name is None:
-                raise RuntimeError(
-                    f"Unknown YOLO class: {object_label}"
-                )
-
+            object_label = classified["label"]
+            material_name = classified["material_name"]
             material = material_lookup[material_name]
 
             scan_object = ScanObject(
                 scan_id=scan_id,
                 object_label=object_label,
-                detection_confidence=detection["confidence"],
-                bounding_box=detection["bounding_box"],
+                detection_confidence=classified["confidence"],
+                bounding_box=classified["bounding_box"],
             )
 
             db.add(scan_object)
@@ -217,7 +191,7 @@ async def process_scan(
             classification = ScanObjectMaterial(
                 scan_object_id=scan_object.id,
                 material_id=material.id,
-                confidence_score=detection["confidence"],
+                confidence_score=classified["confidence"],
             )
 
             db.add(classification)
@@ -259,6 +233,9 @@ async def process_scan(
 
             saved_detections.append({
                 **detection,
+                "label": object_label,
+                "confidence": classified["confidence"],
+                "bounding_box": classified["bounding_box"],
                 "scan_object_id": str(scan_object.id),
                 "material_id": str(material.id),
                 "material_name": material.name,
