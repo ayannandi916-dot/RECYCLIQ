@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 import pytest
 
+from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 from unittest.mock import MagicMock
 
 from app.ai import detector
@@ -447,4 +450,90 @@ def test_image_decode_exception(monkeypatch):
 
     with pytest.raises(ValueError, match="Unable to decode image"):
         detector.detect_waste(b"some image data")
-        
+
+
+# --------------------------------------------------
+# E7.2 - Concurrency and reliability tests
+# --------------------------------------------------
+
+
+def test_concurrent_inference_is_serialized(monkeypatch):
+    """
+    Multiple callers may enter detect_waste concurrently,
+    but the shared YOLO model must only predict once at a time.
+    """
+    active_predictions = 0
+    maximum_active_predictions = 0
+    counter_lock = threading.Lock()
+
+    def fake_predict(**kwargs):
+        nonlocal active_predictions, maximum_active_predictions
+
+        with counter_lock:
+            active_predictions += 1
+            maximum_active_predictions = max(
+                maximum_active_predictions,
+                active_predictions,
+            )
+
+        # Keep the prediction active long enough for other
+        # worker threads to contend for INFERENCE_LOCK.
+        time.sleep(0.05)
+
+        with counter_lock:
+            active_predictions -= 1
+
+        return [FakeResult(boxes=[])]
+
+    model = FakeModel(boxes=[])
+    model.predict.side_effect = fake_predict
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    image_bytes = create_test_image()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(
+            executor.map(
+                lambda _: detector.detect_waste(image_bytes),
+                range(4),
+            )
+        )
+
+    assert len(results) == 4
+    assert all(result["total_detections"] == 0 for result in results)
+    assert maximum_active_predictions == 1
+    assert model.predict.call_count == 4
+
+
+def test_inference_lock_released_after_prediction_failure(monkeypatch):
+    """
+    A prediction exception must not leave the inference lock
+    held or prevent a later request from succeeding.
+    """
+    model = FakeModel(boxes=[])
+    model.predict.side_effect = [
+        RuntimeError("Simulated inference failure"),
+        [FakeResult(boxes=[])],
+    ]
+
+    monkeypatch.setattr(
+        detector,
+        "get_model",
+        lambda: model,
+    )
+
+    image_bytes = create_test_image()
+
+    with pytest.raises(RuntimeError, match="Simulated inference failure"):
+        detector.detect_waste(image_bytes)
+
+    result = detector.detect_waste(image_bytes)
+
+    assert result["total_detections"] == 0
+    assert model.predict.call_count == 2
+

@@ -133,3 +133,56 @@ def test_returned_recommendations_are_independent():
     recommendations[0]["title"] = "Modified title"
 
     assert RECOMMENDATION_RULES["PLASTIC"][0]["title"] == original_title
+
+
+
+# 13. None input should raise ValueError
+def test_none_material_name():
+    with pytest.raises(ValueError):
+        generate_recommendations(None)
+
+
+# 14. Numeric input should raise ValueError
+@pytest.mark.parametrize("material", [123, 45.6])
+def test_numeric_material_name(material):
+    with pytest.raises(ValueError):
+        generate_recommendations(material)
+
+
+# 15. List input should raise ValueError
+def test_list_material_name():
+    with pytest.raises(ValueError):
+        generate_recommendations(["PLASTIC"])
+
+
+# 16. Dictionary input should raise ValueError
+def test_dictionary_material_name():
+    with pytest.raises(ValueError):
+        generate_recommendations({"material": "PLASTIC"})
+
+
+# 17. Whitespace-only input should raise ValueError
+def test_whitespace_only_material_name():
+    with pytest.raises(ValueError):
+        generate_recommendations("     ")
+
+
+# 18. Error message should identify invalid input
+def test_invalid_input_error_message():
+    with pytest.raises(
+        ValueError,
+        match="Material name must be a string"
+    ):
+        generate_recommendations(None)
+
+
+def test_recommendations_do_not_claim_unverified_co2_savings():
+    """CO2 estimates must remain unavailable until validated."""
+
+    for material in MATERIALS:
+        recommendations = generate_recommendations(material)
+
+        for recommendation in recommendations:
+            assert recommendation["estimated_co2_saved"] is None
+
+            

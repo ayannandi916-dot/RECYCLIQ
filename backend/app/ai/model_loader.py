@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from dotenv import load_dotenv
 from ultralytics import YOLO
 
@@ -20,7 +21,7 @@ DEFAULT_MODEL_PATH = (
     / "recycliq_yolo11n_v3_best.pt"
 )
 
-# Protect model initialization and cache replacement.
+# Keep model initialization/cache replacement serialized.
 _MODEL_LOCK = threading.Lock()
 
 _MODEL: Optional[YOLO] = None
@@ -47,31 +48,21 @@ def _validate_checkpoint(model_path: Path) -> None:
     """Validate checkpoint existence, type and size."""
 
     if not model_path.exists():
-        logger.error(
-            "YOLO model checkpoint does not exist: %s",
-            model_path,
-        )
+        logger.error("YOLO model checkpoint does not exist: %s", model_path)
         raise FileNotFoundError(
             f"YOLO model checkpoint not found: {model_path}"
         )
 
     if not model_path.is_file():
-        logger.error(
-            "YOLO model checkpoint is not a file: %s",
-            model_path,
-        )
+        logger.error("YOLO model checkpoint is not a file: %s", model_path)
         raise FileNotFoundError(
             f"YOLO model checkpoint is not a file: {model_path}"
         )
 
     try:
         checkpoint_size = model_path.stat().st_size
-
     except OSError as exc:
-        logger.exception(
-            "Unable to inspect YOLO checkpoint: %s",
-            model_path,
-        )
+        logger.exception("Unable to inspect YOLO checkpoint: %s", model_path)
         raise OSError(
             f"Unable to inspect YOLO model checkpoint: {model_path}"
         ) from exc
@@ -96,39 +87,57 @@ def get_model() -> YOLO:
     model_path = _resolve_model_path()
 
     with _MODEL_LOCK:
-
-        # Reuse the model if the configured path has not changed.
         if _MODEL is not None and _MODEL_PATH == model_path:
             return _MODEL
 
         _validate_checkpoint(model_path)
 
-        logger.info(
-            "Loading RECYCLIQ YOLO model from: %s",
-            model_path,
-        )
+        logger.info("Loading RECYCLIQ YOLO model from: %s", model_path)
 
         try:
             model = YOLO(str(model_path))
-
         except Exception as exc:
-            logger.exception(
-                "Failed to initialize RECYCLIQ YOLO model."
-            )
-
+            logger.exception("Failed to initialize RECYCLIQ YOLO model.")
             raise RuntimeError(
                 "Unable to initialize the RECYCLIQ YOLO model."
             ) from exc
 
-        # Update the cache only after successful initialization.
+        # Cache only after successful initialization.
         _MODEL = model
         _MODEL_PATH = model_path
 
-        logger.info(
-            "RECYCLIQ YOLO model loaded successfully."
-        )
-
+        logger.info("RECYCLIQ YOLO model loaded successfully.")
         return _MODEL
+
+
+def warmup_model(image_size: int = 640) -> None:
+    """
+    Load the model and run one synthetic inference to initialize its
+    prediction path before real scan traffic arrives.
+
+    This is opt-in at application startup because it adds startup time
+    and consumes CPU. Warm-up failures are allowed to propagate.
+    """
+
+    if not isinstance(image_size, int) or image_size <= 0:
+        raise ValueError("Warm-up image_size must be a positive integer.")
+
+    model = get_model()
+    sample_image = np.zeros(
+        (image_size, image_size, 3),
+        dtype=np.uint8,
+    )
+
+    logger.info("Warming up RECYCLIQ YOLO model.")
+    model.predict(
+        source=sample_image,
+        conf=0.25,
+        iou=0.70,
+        imgsz=image_size,
+        device="cpu",
+        verbose=False,
+    )
+    logger.info("RECYCLIQ YOLO model warm-up completed.")
 
 
 def clear_model_cache() -> None:
@@ -144,4 +153,3 @@ def clear_model_cache() -> None:
     with _MODEL_LOCK:
         _MODEL = None
         _MODEL_PATH = None
-        

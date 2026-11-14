@@ -348,3 +348,55 @@ def test_clear_model_cache(monkeypatch, tmp_path):
     assert first_model is not second_model
     assert mocked.call_count == 2
     
+
+
+# E7.5: model warm-up
+def test_warmup_model_loads_and_runs_synthetic_inference(monkeypatch, tmp_path):
+    checkpoint = create_checkpoint(tmp_path / "model.pt")
+    monkeypatch.setattr(model_loader, "DEFAULT_MODEL_PATH", checkpoint)
+
+    mocked_model = MagicMock()
+    mocked_yolo = MagicMock(return_value=mocked_model)
+    monkeypatch.setattr(model_loader, "YOLO", mocked_yolo)
+
+    model_loader.warmup_model()
+
+    mocked_yolo.assert_called_once_with(str(checkpoint.resolve()))
+    mocked_model.predict.assert_called_once()
+
+    call_kwargs = mocked_model.predict.call_args.kwargs
+    assert call_kwargs["source"].shape == (640, 640, 3)
+    assert str(call_kwargs["source"].dtype) == "uint8"
+    assert call_kwargs["conf"] == 0.25
+    assert call_kwargs["iou"] == 0.70
+    assert call_kwargs["imgsz"] == 640
+    assert call_kwargs["device"] == "cpu"
+    assert call_kwargs["verbose"] is False
+
+
+def test_warmup_model_rejects_invalid_image_size(monkeypatch):
+    mocked_yolo = mock_yolo(monkeypatch)
+
+    with pytest.raises(
+        ValueError,
+        match="Warm-up image_size must be a positive integer",
+    ):
+        model_loader.warmup_model(image_size=0)
+
+    mocked_yolo.assert_not_called()
+
+
+def test_warmup_failure_propagates(monkeypatch, tmp_path):
+    checkpoint = create_checkpoint(tmp_path / "model.pt")
+    monkeypatch.setattr(model_loader, "DEFAULT_MODEL_PATH", checkpoint)
+
+    mocked_model = MagicMock()
+    mocked_model.predict.side_effect = RuntimeError("warm-up inference failed")
+    monkeypatch.setattr(
+        model_loader,
+        "YOLO",
+        MagicMock(return_value=mocked_model),
+    )
+
+    with pytest.raises(RuntimeError, match="warm-up inference failed"):
+        model_loader.warmup_model()

@@ -353,8 +353,9 @@ def test_successful_scan_upload(
     kwargs = mock_process.await_args.kwargs
 
     assert kwargs["image_bytes"] == b"test-image-data"
-    assert kwargs["current_user"] == sample_user
-    assert kwargs["db"] == mock_db
+    assert kwargs["user_id"] == sample_user.id
+    assert "db" not in kwargs
+    assert "current_user" not in kwargs
 
 
 # --------------------------------------------------
