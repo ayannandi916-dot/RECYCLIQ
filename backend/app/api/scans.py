@@ -1,31 +1,34 @@
+
+import logging
+from uuid import UUID
+
 from fastapi import (
     APIRouter,
     UploadFile,
     File,
     Depends,
     HTTPException,
-    status
+    status,
+    Query,
 )
-from sqlalchemy.orm import Session
+
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_user
 from app.database.dependencies import get_db
-from app.models import User, WasteScan
-from app.utils.image_validator import validate_image
-from app.services.cloudinary_service import upload_image
-from fastapi import Query
-from uuid import UUID
-
-from sqlalchemy.orm import selectinload
-
-from app.services.cloudinary_service import upload_image, delete_image
 
 from app.models import (
     User,
     WasteScan,
     ScanObject,
-    ScanObjectMaterial
+    ScanObjectMaterial,
 )
+
+from app.utils.image_validator import validate_image
+from app.services.scan_service import process_scan
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/scans",
@@ -33,56 +36,32 @@ router = APIRouter(
 )
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/upload", status_code=status.HTTP_200_OK)
 async def upload_waste_image(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     await validate_image(file)
 
-    image_data = None
-    db_committed = False
-    
-
+    image_bytes = await file.read()
 
     try:
-        image_data = upload_image(file.file)
-
-        new_scan = WasteScan(
-            user_id=current_user.id,
-            image_url=image_data["image_url"],
-            scan_status="pending"
+        return await process_scan(
+            image_bytes=image_bytes,
+            current_user=current_user,
+            db=db,
         )
 
-        db.add(new_scan)
-        db.commit()
-        
-        db_committed = True
-        print("AFTER COMMIT:", db_committed)
-        db.refresh(new_scan)
-
-        return {
-            "message": "Image uploaded and scan created successfully!",
-            "scan_id": str(new_scan.id),
-            "user_id": str(current_user.id),
-            "image_url": new_scan.image_url,
-            "scan_status": new_scan.scan_status
-        }
+    except HTTPException:
+        raise
 
     except Exception:
-        db.rollback()
-
-        print("IN EXCEPT:", db_committed)
-        if not db_committed and image_data and image_data.get("public_id"):
-            try:
-                delete_image(image_data["public_id"])
-            except Exception:
-             pass
+        logger.exception("Scan upload and processing failed.")
 
         raise HTTPException(
-            status_code=500,
-            detail="Failed to upload image or create scan."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Scan processing failed.",
         )
 
 @router.get("/history")
@@ -97,7 +76,10 @@ def get_scan_history(
     scans = (
         db.query(WasteScan)
         .filter(WasteScan.user_id == current_user.id)
-        .order_by(WasteScan.created_at.desc())
+        .order_by(
+            WasteScan.created_at.desc(),
+            WasteScan.id.asc(),
+        )
         .offset(offset)
         .limit(limit)
         .all()

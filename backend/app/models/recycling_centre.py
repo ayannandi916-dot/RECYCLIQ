@@ -8,7 +8,8 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     CheckConstraint,
-    ForeignKey
+    ForeignKey,
+    Index,
 )
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -41,7 +42,7 @@ class RecyclingCentre(Base):
             UUID(as_uuid=True),
             ForeignKey("users.id", ondelete="RESTRICT", name="fk_recycling_centres_owner_id_users"),
             nullable=True,
-            index=True
+            
     )
 
     name: Mapped[str] = mapped_column(
@@ -106,3 +107,11 @@ class RecyclingCentre(Base):
         "User",
         back_populates="recycling_centres"
     )
+
+# Composite index for recycler centre listing
+Index(
+    "ix_recycling_centres_owner_created_at_id",
+    RecyclingCentre.owner_id,
+    RecyclingCentre.created_at.desc(),
+    RecyclingCentre.id.asc(),
+)    

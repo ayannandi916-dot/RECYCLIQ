@@ -11,6 +11,7 @@ from app.utils.security import (
     create_access_token,
     decode_access_token
 )
+from app.core.config import settings
 
 
 TEST_SECRET = "test-secret-key-for-recycliq-automated-tests"
@@ -18,11 +19,17 @@ TEST_SECRET = "test-secret-key-for-recycliq-automated-tests"
 
 @pytest.fixture(autouse=True)
 def configure_test_jwt(monkeypatch):
-    """Configure an isolated JWT secret for testing."""
+    """Configure isolated JWT settings for testing."""
 
-    monkeypatch.setenv("JWT_SECRET_KEY", TEST_SECRET)
-    monkeypatch.setenv("JWT_ALGORITHM", "HS256")
-
+    monkeypatch.setattr(settings, "jwt_secret_key", TEST_SECRET)
+    monkeypatch.setattr(settings, "jwt_algorithm", "HS256")
+    monkeypatch.setattr(settings, "jwt_issuer", "recycliq-api")
+    monkeypatch.setattr(settings, "jwt_audience", "recycliq-client")
+    monkeypatch.setattr(
+        settings,
+        "jwt_access_token_expire_minutes",
+        30
+    )
 
 # 1. Password hashing
 def test_password_hashing():
@@ -102,19 +109,17 @@ def test_invalid_token_rejection():
 
 # 8. Missing JWT secret during token creation
 def test_missing_secret_during_creation(monkeypatch):
-    monkeypatch.delenv("JWT_SECRET_KEY")
+    monkeypatch.setattr(settings, "jwt_secret_key", "")
 
     with pytest.raises(RuntimeError):
         create_access_token({"sub": "test-user-123"})
 
-
 # 9. Missing JWT secret during token decoding
 def test_missing_secret_during_decoding(monkeypatch):
-    monkeypatch.delenv("JWT_SECRET_KEY")
+    monkeypatch.setattr(settings, "jwt_secret_key", "")
 
     with pytest.raises(RuntimeError):
         decode_access_token("invalid.token.value")
-
 # 10. Required JWT claims
 def test_jwt_contains_required_claims():
 
@@ -213,10 +218,7 @@ def test_missing_issuer_rejected():
 
 # 15. Unsupported algorithm rejected
 def test_unsupported_jwt_algorithm_rejected(monkeypatch):
-
-    monkeypatch.setenv("JWT_ALGORITHM", "none")
+    monkeypatch.setattr(settings, "jwt_algorithm", "none")
 
     with pytest.raises(RuntimeError):
-        create_access_token({
-            "sub": "test-user-123"
-        })
+        create_access_token({"sub": "test-user-123"})

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.models import User
@@ -60,7 +60,6 @@ def get_user_by_id(db: Session, user_id: UUID) -> User:
 
     return user
 
-
 def set_user_active_status(
     db: Session,
     user_id: UUID,
@@ -68,43 +67,52 @@ def set_user_active_status(
     admin_id: UUID,
 ) -> User:
 
-    user = get_user_by_id(db, user_id)
-
-    # Prevent an admin from deactivating their own account.
-    if not is_active and user.id == admin_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot deactivate your own account.",
-        )
-
-    # Prevent deactivation of the last active administrator.
-    if not is_active and user.role == "admin" and user.is_active:
-        active_admin_count = (
-            db.query(func.count(User.id))
-            .filter(
-                User.role == "admin",
-                User.is_active.is_(True),
+    try:
+        # Serialize administrator deactivation operations.
+        if not is_active:
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": 726381},
             )
-            .scalar()
-        )
 
-        if active_admin_count <= 1:
+        user = get_user_by_id(db, user_id)
+
+        # Prevent an admin from deactivating their own account.
+        if not is_active and user.id == admin_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot deactivate the last active administrator.",
+                detail="You cannot deactivate your own account.",
             )
 
-    # Idempotent operation.
-    if user.is_active == is_active:
-        return user
+        # Prevent deactivation of the last active administrator.
+        if not is_active and user.role == "admin" and user.is_active:
+            active_admin_count = (
+                db.query(func.count(User.id))
+                .filter(
+                    User.role == "admin",
+                    User.is_active.is_(True),
+                )
+                .scalar()
+            )
 
-    user.is_active = is_active
+            if active_admin_count <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot deactivate the last active administrator.",
+                )
 
-    try:
+        # Idempotent operation.
+        if user.is_active == is_active:
+            db.rollback()
+            return user
+
+        user.is_active = is_active
+
         db.commit()
         db.refresh(user)
+
+        return user
+
     except Exception:
         db.rollback()
         raise
-
-    return user

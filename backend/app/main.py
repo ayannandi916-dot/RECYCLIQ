@@ -10,7 +10,7 @@ from app.database.connection import engine
 
 from app.api.auth import router as auth_router
 from app.api.scans import router as scans_router
-from app.api.ai import router as ai_router
+
 from app.api.recycler import router as recycler_router
 from app.api.recycler import admin_router as admin_recycler_router
 from app.api.admin import router as admin_user_router
@@ -70,7 +70,7 @@ app.add_middleware(
 # Register API routers
 app.include_router(auth_router)
 app.include_router(scans_router)
-app.include_router(ai_router)
+
 app.include_router(recycler_router)
 app.include_router(admin_recycler_router)
 app.include_router(admin_user_router)

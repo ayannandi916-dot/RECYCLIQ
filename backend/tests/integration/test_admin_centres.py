@@ -351,23 +351,104 @@ def test_admin_centre_pagination(api_client, db_session):
     admin = create_test_user(db_session, role="admin")
     recycler = create_test_user(db_session, role="recycler")
 
-    for _ in range(3):
+    for _ in range(5):
         create_test_centre(db_session, recycler.id)
+
+    headers = get_auth_headers(admin)
+
+    # First page
+    response_1 = api_client.get(
+        "/admin/centres",
+        params={"page": 1, "page_size": 2},
+        headers=headers,
+    )
+
+    assert response_1.status_code == status.HTTP_200_OK
+
+    data_1 = response_1.json()
+
+    assert data_1["page"] == 1
+    assert data_1["page_size"] == 2
+    assert len(data_1["items"]) == 2
+    assert data_1["total"] == 5
+
+    # Middle page
+    response_2 = api_client.get(
+        "/admin/centres",
+        params={"page": 2, "page_size": 2},
+        headers=headers,
+    )
+
+    assert response_2.status_code == status.HTTP_200_OK
+
+    data_2 = response_2.json()
+
+    assert data_2["page"] == 2
+    assert len(data_2["items"]) == 2
+
+    # Last page
+    response_3 = api_client.get(
+        "/admin/centres",
+        params={"page": 3, "page_size": 2},
+        headers=headers,
+    )
+
+    assert response_3.status_code == status.HTTP_200_OK
+
+    data_3 = response_3.json()
+
+    assert data_3["page"] == 3
+    assert len(data_3["items"]) == 1
+
+    # No duplicate records across pages
+    all_ids = (
+        [item["id"] for item in data_1["items"]]
+        + [item["id"] for item in data_2["items"]]
+        + [item["id"] for item in data_3["items"]]
+    )
+
+    assert len(all_ids) == 5
+    assert len(set(all_ids)) == 5
+
+def test_admin_centre_pagination_has_stable_tie_breaker(
+    api_client,
+    db_session,
+):
+    admin = create_test_user(db_session, role="admin")
+    recycler = create_test_user(db_session, role="recycler")
+
+    centres = [
+        create_test_centre(db_session, recycler.id)
+        for _ in range(4)
+    ]
+
+    # Give every centre exactly the same timestamp.
+    shared_timestamp = centres[0].created_at
+
+    for centre in centres:
+        centre.created_at = shared_timestamp
+
+    db_session.commit()
 
     response = api_client.get(
         "/admin/centres",
-        params={"page": 1, "page_size": 2},
+        params={"page": 1, "page_size": 10},
         headers=get_auth_headers(admin),
     )
 
     assert response.status_code == status.HTTP_200_OK
 
-    data = response.json()
+    returned_ids = [
+        item["id"]
+        for item in response.json()["items"]
+    ]
 
-    assert data["page"] == 1
-    assert data["page_size"] == 2
-    assert len(data["items"]) <= 2
+    expected_ids = sorted(
+        str(centre.id)
+        for centre in centres
+    )
 
+    assert returned_ids == expected_ids
 
 def test_admin_centre_invalid_pagination_returns_422(
     api_client,

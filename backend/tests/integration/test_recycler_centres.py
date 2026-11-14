@@ -14,6 +14,7 @@ from app.models.material import Material
 from app.models.recycling_centre_material import RecyclingCentreMaterial
 from app.utils.security import hash_password
 from app.utils.security import create_access_token
+from datetime import datetime, timezone
 
 
 # =========================================================
@@ -177,6 +178,92 @@ def test_recycler_can_list_own_centres(api_client, db_session):
     names = {centre["name"] for centre in response.json()}
 
     assert names == {"Centre One", "Centre Two"}
+
+# =========================================================
+# CENTRE LIST ORDERING REGRESSION TESTS
+# =========================================================
+
+
+def test_recycler_centre_list_has_stable_ordering(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    created_centres = []
+
+    for index in range(4):
+        response = api_client.post(
+            "/recycler/centres",
+            json=centre_payload(name=f"Ordering Centre {index}"),
+            headers=get_auth_headers(recycler),
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        created_centres.append(response.json()["id"])
+
+    # Give all centres the same timestamp.
+    shared_timestamp = datetime.now(timezone.utc)
+
+    centres = (
+        db_session.query(RecyclingCentre)
+        .filter(RecyclingCentre.owner_id == recycler.id)
+        .all()
+    )
+
+    for centre in centres:
+        centre.created_at = shared_timestamp
+
+    db_session.commit()
+
+    response = api_client.get(
+        "/recycler/centres",
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    returned_ids = [
+        centre["id"]
+        for centre in response.json()
+    ]
+
+    expected_ids = sorted(created_centres)
+
+    assert returned_ids == expected_ids
+
+
+def test_recycler_centre_list_returns_only_owned_centres(
+    api_client,
+    db_session,
+):
+    recycler_one = create_test_user(db_session, role="recycler")
+    recycler_two = create_test_user(db_session, role="recycler")
+
+    api_client.post(
+        "/recycler/centres",
+        json=centre_payload(name="Recycler One Centre"),
+        headers=get_auth_headers(recycler_one),
+    )
+
+    api_client.post(
+        "/recycler/centres",
+        json=centre_payload(name="Recycler Two Centre"),
+        headers=get_auth_headers(recycler_two),
+    )
+
+    response = api_client.get(
+        "/recycler/centres",
+        headers=get_auth_headers(recycler_one),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    centres = response.json()
+
+    assert len(centres) == 1
+    assert centres[0]["owner_id"] == str(recycler_one.id)
 
 
 def test_recycler_cannot_see_other_recyclers_centres(
@@ -512,3 +599,158 @@ def test_deleting_centre_deletes_material_mappings(
 
     # The mapping should be deleted, but the material should remain.
     assert db_session.get(Material, material.id) is not None
+
+# =========================================================
+# ACCEPTED MATERIALS REPLACEMENT
+# =========================================================
+
+
+def create_test_material(db_session, name):
+    material = Material(
+        name=name,
+        category="Plastic",
+        description="Test recyclable material",
+        recyclable=True,
+        biodegradable=False,
+    )
+
+    db_session.add(material)
+    db_session.commit()
+    db_session.refresh(material)
+
+    return material
+
+
+def test_recycler_can_replace_centre_materials(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    material_one = create_test_material(
+        db_session, f"Plastic-{uuid4()}"
+    )
+    material_two = create_test_material(
+        db_session, f"Paper-{uuid4()}"
+    )
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}/materials",
+        json={
+            "material_ids": [
+                str(material_one.id),
+                str(material_two.id),
+            ]
+        },
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    returned_ids = {item["id"] for item in response.json()}
+
+    assert returned_ids == {
+        str(material_one.id),
+        str(material_two.id),
+    }
+
+
+def test_duplicate_material_ids_are_rejected(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    material = create_test_material(
+        db_session, f"Plastic-{uuid4()}"
+    )
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}/materials",
+        json={
+            "material_ids": [
+                str(material.id),
+                str(material.id),
+            ]
+        },
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+def test_invalid_replacement_preserves_existing_materials(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    material_one = create_test_material(
+        db_session, f"Plastic-{uuid4()}"
+    )
+    material_two = create_test_material(
+        db_session, f"Paper-{uuid4()}"
+    )
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    headers = get_auth_headers(recycler)
+
+    # First, save a valid material mapping.
+    initial_response = api_client.put(
+        f"/recycler/centres/{centre_id}/materials",
+        json={
+            "material_ids": [str(material_one.id)]
+        },
+        headers=headers,
+    )
+
+    assert initial_response.status_code == status.HTTP_200_OK
+
+    # Now attempt an invalid replacement with duplicate IDs.
+    invalid_response = api_client.put(
+        f"/recycler/centres/{centre_id}/materials",
+        json={
+            "material_ids": [
+                str(material_two.id),
+                str(material_two.id),
+            ]
+        },
+        headers=headers,
+    )
+
+    assert invalid_response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    # Verify the original mapping remains unchanged.
+    final_response = api_client.get(
+        f"/recycler/centres/{centre_id}/materials",
+        headers=headers,
+    )
+
+    assert final_response.status_code == status.HTTP_200_OK
+
+    returned_ids = {item["id"] for item in final_response.json()}
+
+    assert returned_ids == {str(material_one.id)}

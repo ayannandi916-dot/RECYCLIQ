@@ -2,21 +2,32 @@ import pytest
 from unittest.mock import MagicMock
 
 from app.services import cloudinary_service as cloudinary_service
-
+from app.core.config import settings
 
 # 1. Successful Cloudinary configuration
 def test_successful_cloudinary_configuration(monkeypatch):
-
-    monkeypatch.setenv("CLOUDINARY_CLOUD_NAME", "test-cloud")
-    monkeypatch.setenv("CLOUDINARY_API_KEY", "test-key")
-    monkeypatch.setenv("CLOUDINARY_API_SECRET", "test-secret")
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_cloud_name",
+        "test-cloud",
+    )
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_api_key",
+        "test-key",
+    )
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_api_secret",
+        "test-secret",
+    )
 
     mock_config = MagicMock()
 
     monkeypatch.setattr(
         cloudinary_service.cloudinary,
         "config",
-        mock_config
+        mock_config,
     )
 
     cloudinary_service.configure_cloudinary()
@@ -25,34 +36,31 @@ def test_successful_cloudinary_configuration(monkeypatch):
         cloud_name="test-cloud",
         api_key="test-key",
         api_secret="test-secret",
-        secure=True
+        secure=True,
     )
 
-
-# 2. Missing Cloudinary credentials
 def test_missing_cloudinary_credentials(monkeypatch):
-
-    monkeypatch.delenv(
-        "CLOUDINARY_CLOUD_NAME",
-        raising=False
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_cloud_name",
+        None,
     )
-
-    monkeypatch.delenv(
-        "CLOUDINARY_API_KEY",
-        raising=False
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_api_key",
+        None,
     )
-
-    monkeypatch.delenv(
-        "CLOUDINARY_API_SECRET",
-        raising=False
+    monkeypatch.setattr(
+        settings,
+        "cloudinary_api_secret",
+        None,
     )
 
     with pytest.raises(
         RuntimeError,
-        match="Cloudinary credentials are not configured"
+        match="Cloudinary credentials are not configured",
     ):
         cloudinary_service.configure_cloudinary()
-
 
 # 3. Successful image upload
 def test_successful_image_upload(monkeypatch):
@@ -168,7 +176,11 @@ def test_invalid_cloudinary_response(monkeypatch):
         MagicMock(return_value={})
     )
 
-    with pytest.raises(KeyError):
+    
+    with pytest.raises(
+        RuntimeError,
+        match="Cloudinary returned an invalid upload response."
+    ):
         cloudinary_service.upload_image(b"fake-image-data")
 
 # 7. Successful image deletion

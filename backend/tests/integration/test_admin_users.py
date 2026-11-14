@@ -6,6 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.utils.security import hash_password, create_access_token
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+from fastapi import HTTPException
+from sqlalchemy.orm import sessionmaker
+
+from app.services.admin_service import set_user_active_status
 
 
 # =========================================================
@@ -374,3 +381,167 @@ def test_admin_can_deactivate_already_inactive_user(
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["user"]["is_active"] is False
+
+### Test 1 — Deactivated admin cannot access admin endpoints
+
+
+def test_deactivated_admin_cannot_access_admin_endpoint(
+    api_client,
+    db_session,
+):
+    admin = create_test_user(db_session, role="admin")
+    headers = get_auth_headers(admin)
+
+    admin.is_active = False
+    db_session.commit()
+
+    response = api_client.get(
+        "/admin/users",
+        headers=headers,
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+### Test 2 — Role changes take effect immediately
+
+
+def test_role_change_takes_effect_immediately(
+    api_client,
+    db_session,
+):
+    user = create_test_user(db_session, role="user")
+
+    existing_headers = get_auth_headers(user)
+
+    user.role = "admin"
+    db_session.commit()
+
+    response = api_client.get(
+        "/admin/users",
+        headers=existing_headers,
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+
+### Test 3 — Deactivated user cannot access admin endpoints
+
+
+def test_deactivated_user_cannot_access_admin_endpoint(
+    api_client,
+    db_session,
+):
+    user = create_test_user(
+        db_session,
+        role="user",
+        is_active=False,
+    )
+
+    response = api_client.get(
+        "/admin/users",
+        headers=get_auth_headers(user),
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+def test_concurrent_admin_deactivation_preserves_one_active_admin(
+    test_engine,
+):
+    TestSession = sessionmaker(
+        bind=test_engine,
+        expire_on_commit=False,
+    )
+
+    setup_session = TestSession()
+
+    admin_one = create_test_user(
+        setup_session,
+        role="admin",
+    )
+
+    admin_two = create_test_user(
+        setup_session,
+        role="admin",
+    )
+
+    admin_one_id = admin_one.id
+    admin_two_id = admin_two.id
+
+    setup_session.close()
+
+    barrier = Barrier(2)
+
+    def deactivate(target_id, actor_id):
+        session = TestSession()
+
+        try:
+            barrier.wait(timeout=10)
+
+            set_user_active_status(
+                db=session,
+                user_id=target_id,
+                is_active=False,
+                admin_id=actor_id,
+            )
+
+            return "success"
+
+        except HTTPException as exc:
+            return exc.status_code
+
+        finally:
+            session.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_one = executor.submit(
+                deactivate,
+                admin_two_id,
+                admin_one_id,
+            )
+
+            future_two = executor.submit(
+                deactivate,
+                admin_one_id,
+                admin_two_id,
+            )
+
+            results = [
+                future_one.result(timeout=30),
+                future_two.result(timeout=30),
+            ]
+
+        assert results.count("success") == 1
+        assert results.count(400) == 1
+
+        verification_session = TestSession()
+
+        try:
+            active_admin_count = (
+                verification_session.query(User)
+                .filter(
+                    User.role == "admin",
+                    User.is_active.is_(True),
+                    User.id.in_([admin_one_id, admin_two_id]),
+                )
+                .count()
+            )
+
+            assert active_admin_count == 1
+
+        finally:
+            verification_session.close()
+
+    finally:
+        cleanup_session = TestSession()
+
+        try:
+            cleanup_session.query(User).filter(
+                User.id.in_([admin_one_id, admin_two_id])
+            ).delete(synchronize_session=False)
+
+            cleanup_session.commit()
+
+        finally:
+            cleanup_session.close()

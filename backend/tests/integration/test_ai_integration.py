@@ -2,14 +2,12 @@ import uuid
 from io import BytesIO
 
 import pytest
-
 from PIL import Image
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.database.dependencies import get_db
 from app.api.dependencies import get_current_user
-from app.utils.security import create_access_token
 
 from app.models import (
     User,
@@ -20,7 +18,7 @@ from app.models import (
     Recommendation,
 )
 
-from app.api import ai
+from app.services import scan_service
 
 
 # ============================================================
@@ -62,7 +60,7 @@ def ai_client(db_session, ai_user, monkeypatch):
 
     # Mock Cloudinary upload.
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "upload_image",
         lambda file: {
             "image_url": "https://example.com/test-image.jpg",
@@ -75,14 +73,14 @@ def ai_client(db_session, ai_user, monkeypatch):
         return func(*args)
 
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "run_in_threadpool",
         fake_threadpool,
     )
 
     # Mock YOLO detection.
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "detect_waste",
         lambda image: {
             "image_width": 100,
@@ -105,7 +103,7 @@ def ai_client(db_session, ai_user, monkeypatch):
 
     # Mock recommendation generation.
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "generate_recommendations",
         lambda material: [
             {
@@ -125,16 +123,16 @@ def ai_client(db_session, ai_user, monkeypatch):
         ],
     )
 
-    with TestClient(app) as client:
-        yield client, image_bytes
-
-    app.dependency_overrides.pop(get_db, None)
-    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        with TestClient(app) as client:
+            yield client, image_bytes
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
 def ai_materials(db_session):
-    from app.models import Material
 
     material_names = [
         "Biodegradable",
@@ -170,8 +168,9 @@ def ai_materials(db_session):
 
     return materials
 
+
 # ============================================================
-# TEST 1: COMPLETE AI PIPELINE
+# TEST 1: COMPLETE SCAN PIPELINE
 # ============================================================
 
 def test_complete_ai_pipeline(
@@ -184,7 +183,7 @@ def test_complete_ai_pipeline(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",
@@ -213,9 +212,11 @@ def test_complete_ai_pipeline(
     assert scan.user_id == ai_user.id
     assert scan.scan_status == "completed"
 
-    detected_objects = db_session.query(ScanObject).filter(
-        ScanObject.scan_id == scan.id
-    ).all()
+    detected_objects = (
+        db_session.query(ScanObject)
+        .filter(ScanObject.scan_id == scan.id)
+        .all()
+    )
 
     assert len(detected_objects) == 1
 
@@ -233,7 +234,7 @@ def test_material_classification_persisted(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",
@@ -247,15 +248,19 @@ def test_material_classification_persisted(
 
     scan_id = uuid.UUID(response.json()["scan_id"])
 
-    detected_object = db_session.query(ScanObject).filter(
-        ScanObject.scan_id == scan_id
-    ).first()
+    detected_object = (
+        db_session.query(ScanObject)
+        .filter(ScanObject.scan_id == scan_id)
+        .first()
+    )
 
-    classification = db_session.query(
-        ScanObjectMaterial
-    ).filter(
-        ScanObjectMaterial.scan_object_id == detected_object.id
-    ).first()
+    classification = (
+        db_session.query(ScanObjectMaterial)
+        .filter(
+            ScanObjectMaterial.scan_object_id == detected_object.id
+        )
+        .first()
+    )
 
     assert classification is not None
     assert classification.confidence_score == 0.95
@@ -275,7 +280,7 @@ def test_recommendations_persisted(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",
@@ -289,15 +294,19 @@ def test_recommendations_persisted(
 
     scan_id = uuid.UUID(response.json()["scan_id"])
 
-    detected_object = db_session.query(ScanObject).filter(
-        ScanObject.scan_id == scan_id
-    ).first()
+    detected_object = (
+        db_session.query(ScanObject)
+        .filter(ScanObject.scan_id == scan_id)
+        .first()
+    )
 
-    recommendations = db_session.query(
-        Recommendation
-    ).filter(
-        Recommendation.scan_object_id == detected_object.id
-    ).all()
+    recommendations = (
+        db_session.query(Recommendation)
+        .filter(
+            Recommendation.scan_object_id == detected_object.id
+        )
+        .all()
+    )
 
     assert len(recommendations) == 2
 
@@ -323,7 +332,7 @@ def test_ai_scan_ownership(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",
@@ -339,6 +348,7 @@ def test_ai_scan_ownership(
 
     scan = db_session.get(WasteScan, scan_id)
 
+    assert scan is not None
     assert scan.user_id == ai_user.id
 
 
@@ -350,12 +360,13 @@ def test_ai_invalid_image_rejected(
     ai_client,
     db_session,
 ):
+
     client, _ = ai_client
 
     scans_before = db_session.query(WasteScan).count()
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "invalid.jpg",
@@ -366,7 +377,9 @@ def test_ai_invalid_image_rejected(
     )
 
     assert response.status_code == 400
+
     assert db_session.query(WasteScan).count() == scans_before
+
 
 # ============================================================
 # TEST 6: NO DETECTIONS STILL COMPLETES SCAN
@@ -380,7 +393,7 @@ def test_ai_no_detections(
 ):
 
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "detect_waste",
         lambda image: {
             "image_width": 100,
@@ -392,7 +405,7 @@ def test_ai_no_detections(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "empty.jpg",
@@ -415,24 +428,22 @@ def test_ai_no_detections(
 # TEST 7: MISSING MATERIAL CAUSES FAILED SCAN
 # ============================================================
 
-
 def test_ai_missing_material_marks_scan_failed(
     ai_client,
     db_session,
     monkeypatch,
 ):
-    from app.models import Material
 
-    # Preserve the original database query method
     original_query = db_session.query
 
-    # Mock only Material queries to simulate missing materials
+    # Mock only Material queries.
     def mock_query(model):
         query = original_query(model)
 
         if model is Material:
 
             class MissingMaterialQuery:
+
                 def filter(self, *args, **kwargs):
                     return self
 
@@ -449,12 +460,10 @@ def test_ai_missing_material_marks_scan_failed(
         mock_query,
     )
 
-    # Prepare API client and valid image
     client, image_bytes = ai_client
 
-    # Send image to AI detection endpoint
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",
@@ -464,10 +473,9 @@ def test_ai_missing_material_marks_scan_failed(
         },
     )
 
-    # Verify API returns an internal server error
     assert response.status_code == 500
 
-    # Retrieve the scan created by this request
+    # Retrieve the scan created by this request.
     scan = (
         original_query(WasteScan)
         .filter(
@@ -477,7 +485,6 @@ def test_ai_missing_material_marks_scan_failed(
         .first()
     )
 
-    # Verify failed scan is persisted
     assert scan is not None
     assert scan.scan_status == "failed"
 
@@ -492,11 +499,12 @@ def test_ai_detection_failure_marks_scan_failed(
     db_session,
     monkeypatch,
 ):
+
     def fail_detection(image):
         raise RuntimeError("Simulated YOLO failure")
 
     monkeypatch.setattr(
-        ai,
+        scan_service,
         "detect_waste",
         fail_detection,
     )
@@ -509,7 +517,7 @@ def test_ai_detection_failure_marks_scan_failed(
     client, image_bytes = ai_client
 
     response = client.post(
-        "/ai/detect",
+        "/scans/upload",
         files={
             "file": (
                 "plastic.jpg",

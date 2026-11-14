@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Boolean
+from sqlalchemy import String, DateTime, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base
@@ -70,5 +70,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+
+    __table_args__ = (
+    CheckConstraint(
+        "role IN ('user', 'recycler', 'admin')",
+        name="ck_users_role",
+    ),
+)
 
     

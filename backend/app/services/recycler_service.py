@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -45,20 +46,29 @@ def submit_application(
             )
 
         # Allow rejected applications to be resubmitted.
-        existing.business_name = data.business_name
-        existing.contact_number = data.contact_number
-        existing.business_address = data.business_address
-        existing.city = data.city
-        existing.state = data.state
-        existing.postal_code = data.postal_code
-        existing.registration_number = data.registration_number
-        existing.website = str(data.website) if data.website else None
-        existing.status = "pending"
-        existing.rejection_reason = None
-        existing.reviewed_by = None
-        existing.reviewed_at = None
+        try:
+            existing.business_name = data.business_name
+            existing.contact_number = data.contact_number
+            existing.business_address = data.business_address
+            existing.city = data.city
+            existing.state = data.state
+            existing.postal_code = data.postal_code
+            existing.registration_number = data.registration_number
+            existing.website = str(data.website) if data.website else None
 
-        application = existing
+            existing.status = "pending"
+            existing.rejection_reason = None
+            existing.reviewed_by = None
+            existing.reviewed_at = None
+
+            db.commit()
+            db.refresh(existing)
+
+            return existing
+
+        except Exception:
+            db.rollback()
+            raise
 
     else:
         application = RecyclerApplication(
@@ -73,16 +83,36 @@ def submit_application(
             website=str(data.website) if data.website else None,
         )
 
-        db.add(application)
+        try:
+            db.add(application)
+            db.commit()
+            db.refresh(application)
+            return application
 
-    try:
-        db.commit()
-        db.refresh(application)
-        return application
-    except Exception:
-        db.rollback()
-        raise
+        except IntegrityError as exc:
+            db.rollback()
 
+            try:
+                concurrent_application = db.scalar(
+                    select(RecyclerApplication).where(
+                        RecyclerApplication.user_id == user.id
+                    )
+                )
+            except Exception:
+                db.rollback()
+                raise
+
+            if concurrent_application is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="You already have a recycler application.",
+                ) from exc
+
+            raise
+
+        except Exception:
+            db.rollback()
+            raise
 
 def get_my_application(db: Session, user: User):
     application = db.scalar(
@@ -105,36 +135,37 @@ def update_application(
     user: User,
     data: RecyclerApplicationUpdate,
 ):
-    application = get_my_application(db, user)
-
-    if application.status != "rejected":
-        raise HTTPException(
-            status_code=409,
-            detail="Only rejected applications can be edited and resubmitted.",
-        )
-
-    application.business_name = data.business_name
-    application.contact_number = data.contact_number
-    application.business_address = data.business_address
-    application.city = data.city
-    application.state = data.state
-    application.postal_code = data.postal_code
-    application.registration_number = data.registration_number
-    application.website = str(data.website) if data.website else None
-
-    application.status = "pending"
-    application.rejection_reason = None
-    application.reviewed_by = None
-    application.reviewed_at = None
-
     try:
+        application = get_my_application(db, user)
+
+        if application.status != "rejected":
+            raise HTTPException(
+                status_code=409,
+                detail="Only rejected applications can be edited and resubmitted.",
+            )
+
+        application.business_name = data.business_name
+        application.contact_number = data.contact_number
+        application.business_address = data.business_address
+        application.city = data.city
+        application.state = data.state
+        application.postal_code = data.postal_code
+        application.registration_number = data.registration_number
+        application.website = str(data.website) if data.website else None
+
+        application.status = "pending"
+        application.rejection_reason = None
+        application.reviewed_by = None
+        application.reviewed_at = None
+
         db.commit()
         db.refresh(application)
+
         return application
+
     except Exception:
         db.rollback()
         raise
-
 
 def get_all_applications(db: Session, application_status: str | None = None):
     query = select(RecyclerApplication).order_by(

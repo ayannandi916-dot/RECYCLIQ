@@ -49,5 +49,17 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    # JWT Configuration
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "recycliq-api"
+    jwt_audience: str = "recycliq-client"
+    jwt_access_token_expire_minutes: int = Field(default=30, gt=0)
+
+    # Cloudinary Configuration
+    cloudinary_cloud_name: str | None = None
+    cloudinary_api_key: str | None = None
+    cloudinary_api_secret: str | None = None
+
 
 settings = Settings()

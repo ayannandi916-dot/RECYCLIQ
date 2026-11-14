@@ -39,7 +39,10 @@ def list_all_centres(
 
     centres = db.scalars(
         statement
-        .order_by(RecyclingCentre.created_at.desc())
+        .order_by(
+            RecyclingCentre.created_at.desc(),
+            RecyclingCentre.id.asc(),
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
