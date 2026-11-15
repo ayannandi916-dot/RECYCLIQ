@@ -236,3 +236,204 @@ def test_concurrent_application_integrity_error_returns_409():
 
     db.rollback.assert_called_once()
     assert db.scalar.call_count == 2
+
+def test_admin_can_list_all_applications(api_client, db_session):
+    user_one = create_test_user(db_session)
+    user_two = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user_one),
+    )
+
+    api_client.post(
+        "/recycler/apply",
+        json=application_payload(business_name="Second Business"),
+        headers=get_auth_headers(user_two),
+    )
+
+    response = api_client.get(
+        "/admin/recycler/applications",
+        headers=get_auth_headers(admin),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.json()) == 2
+
+def test_admin_can_filter_applications_by_status(api_client, db_session):
+    user_one = create_test_user(db_session)
+    user_two = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    first = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user_one),
+    )
+
+    api_client.post(
+        "/recycler/apply",
+        json=application_payload(business_name="Second Business"),
+        headers=get_auth_headers(user_two),
+    )
+
+    application_id = first.json()["id"]
+
+    api_client.post(
+        f"/admin/recycler/applications/{application_id}/reject",
+        json={"reason": "Incomplete business information"},
+        headers=get_auth_headers(admin),
+    )
+
+    response = api_client.get(
+        "/admin/recycler/applications?application_status=rejected",
+        headers=get_auth_headers(admin),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.json()) == 1
+    assert response.json()[0]["status"] == "rejected"
+
+def test_admin_can_approve_application_and_change_user_role(
+    api_client, db_session
+):
+    user = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    application_id = application.json()["id"]
+
+    response = api_client.post(
+        f"/admin/recycler/applications/{application_id}/approve",
+        headers=get_auth_headers(admin),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["status"] == "approved"
+
+    db_session.refresh(user)
+    assert user.role == "recycler"
+
+def test_admin_can_reject_application(api_client, db_session):
+    user = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    application_id = application.json()["id"]
+
+    response = api_client.post(
+        f"/admin/recycler/applications/{application_id}/reject",
+        json={"reason": "Invalid business registration"},
+        headers=get_auth_headers(admin),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["status"] == "rejected"
+    assert response.json()["rejection_reason"] == (
+        "Invalid business registration"
+    )
+
+def test_rejected_application_can_be_resubmitted(api_client, db_session):
+    user = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    application_id = application.json()["id"]
+
+    api_client.post(
+        f"/admin/recycler/applications/{application_id}/reject",
+        json={"reason": "Incomplete information"},
+        headers=get_auth_headers(admin),
+    )
+
+    response = api_client.post(
+        "/recycler/apply",
+        json=application_payload(business_name="Updated Business"),
+        headers=get_auth_headers(user),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json()["id"] == application_id
+    assert response.json()["business_name"] == "Updated Business"
+    assert response.json()["status"] == "pending"
+    assert response.json()["rejection_reason"] is None
+
+def test_already_approved_application_cannot_be_approved_again(
+    api_client, db_session
+):
+    user = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    application_id = application.json()["id"]
+
+    first_response = api_client.post(
+        f"/admin/recycler/applications/{application_id}/approve",
+        headers=get_auth_headers(admin),
+    )
+
+    second_response = api_client.post(
+        f"/admin/recycler/applications/{application_id}/approve",
+        headers=get_auth_headers(admin),
+    )
+
+    assert first_response.status_code == status.HTTP_200_OK
+    assert second_response.status_code == status.HTTP_409_CONFLICT
+
+def test_non_admin_cannot_approve_application(api_client, db_session):
+    user = create_test_user(db_session)
+    another_user = create_test_user(db_session)
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    response = api_client.post(
+        f"/admin/recycler/applications/{application.json()['id']}/approve",
+        headers=get_auth_headers(another_user),
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+def test_non_admin_cannot_reject_application(api_client, db_session):
+    user = create_test_user(db_session)
+    another_user = create_test_user(db_session)
+
+    application = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    response = api_client.post(
+        f"/admin/recycler/applications/{application.json()['id']}/reject",
+        json={"reason": "Invalid application"},
+        headers=get_auth_headers(another_user),
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+

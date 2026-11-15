@@ -271,3 +271,42 @@ def reject_application(
     except Exception:
         db.rollback()
         raise
+
+def get_recycler_profile(db: Session, user: User):
+    profile = db.scalar(
+        select(RecyclerApplication).where(
+            RecyclerApplication.user_id == user.id,
+            RecyclerApplication.status == "approved",
+        )
+    )
+
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail="Recycler profile not found.",
+        )
+
+    return profile
+
+
+def update_recycler_profile(db: Session, user: User, data):
+    profile = get_recycler_profile(db, user)
+
+    try:
+        profile.business_name = data.business_name
+        profile.contact_number = data.contact_number
+        profile.business_address = data.business_address
+        profile.city = data.city
+        profile.state = data.state
+        profile.postal_code = data.postal_code
+        profile.registration_number = data.registration_number
+        profile.website = str(data.website) if data.website else None
+
+        db.commit()
+        db.refresh(profile)
+
+        return profile
+
+    except Exception:
+        db.rollback()
+        raise

@@ -9,21 +9,6 @@ from app.api.permissions import require_role
 
 from app.models.user import User
 
-from app.schemas.recycler import (
-    RecyclerApplicationCreate,
-    RecyclerApplicationUpdate,
-    RecyclerApplicationResponse,
-    RecyclerApplicationReject,
-)
-
-from app.services.recycler_service import (
-    submit_application,
-    get_my_application,
-    update_application,
-    get_all_applications,
-    approve_application,
-    reject_application,
-)
 
 from app.schemas.recycling_centre import (
     RecyclingCentreCreate,
@@ -49,6 +34,26 @@ from app.services.recycling_centre_service import (
     replace_centre_materials,
 )
 
+from app.schemas.recycler import (
+    RecyclerApplicationCreate,
+    RecyclerApplicationUpdate,
+    RecyclerApplicationResponse,
+    RecyclerApplicationReject,
+    RecyclerProfileUpdate,
+    RecyclerProfileResponse,
+)
+
+
+from app.services.recycler_service import (
+    submit_application,
+    get_my_application,
+    update_application,
+    get_all_applications,
+    approve_application,
+    reject_application,
+    get_recycler_profile,
+    update_recycler_profile,
+)
 
 router = APIRouter(prefix="/recycler", tags=["Recycler"])
 
@@ -253,3 +258,30 @@ def reject_recycler(
     admin: User = Depends(require_role("admin")),
 ):
     return reject_application(db, application_id, admin, data)
+
+
+# =========================================================
+# RECYCLER PROFILE MANAGEMENT
+# =========================================================
+
+@router.get(
+    "/profile",
+    response_model=RecyclerProfileResponse,
+)
+def my_recycler_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("recycler")),
+):
+    return get_recycler_profile(db, current_user)
+
+
+@router.put(
+    "/profile",
+    response_model=RecyclerProfileResponse,
+)
+def edit_recycler_profile(
+    data: RecyclerProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("recycler")),
+):
+    return update_recycler_profile(db, current_user, data)

@@ -10,9 +10,13 @@ from app.schemas.recycling_centre import (
     RecyclingCentreUpdate,
 )
 
-
 from app.models.material import Material
 from app.models.recycling_centre_material import RecyclingCentreMaterial
+
+
+# =========================================================
+# CREATE RECYCLING CENTRE
+# =========================================================
 
 def create_centre(
     db: Session,
@@ -35,6 +39,10 @@ def create_centre(
         raise
 
 
+# =========================================================
+# GET MY RECYCLING CENTRES
+# =========================================================
+
 def get_my_centres(
     db: Session,
     current_user_id: UUID,
@@ -49,6 +57,11 @@ def get_my_centres(
     )
 
     return db.scalars(statement).all()
+
+
+# =========================================================
+# GET RECYCLING CENTRE
+# =========================================================
 
 def get_centre(
     db: Session,
@@ -70,6 +83,10 @@ def get_centre(
 
     return centre
 
+
+# =========================================================
+# UPDATE RECYCLING CENTRE
+# =========================================================
 
 def update_centre(
     db: Session,
@@ -94,6 +111,10 @@ def update_centre(
         raise
 
 
+# =========================================================
+# DELETE RECYCLING CENTRE
+# =========================================================
+
 def delete_centre(
     db: Session,
     current_user_id: UUID,
@@ -108,6 +129,11 @@ def delete_centre(
     except Exception:
         db.rollback()
         raise
+
+
+# =========================================================
+# GET ACCEPTED MATERIALS
+# =========================================================
 
 def get_centre_materials(
     db: Session,
@@ -131,6 +157,11 @@ def get_centre_materials(
 
     return db.scalars(statement).all()
 
+
+# =========================================================
+# REPLACE ACCEPTED MATERIALS
+# =========================================================
+
 def replace_centre_materials(
     db: Session,
     current_user_id: UUID,
@@ -149,15 +180,24 @@ def replace_centre_materials(
 
     # Validate all material IDs before modifying anything
     if material_ids:
-        statement = select(Material.id).where(
+        statement = select(
+            Material.id,
+            Material.recyclable,
+        ).where(
             Material.id.in_(material_ids)
         )
 
-        existing_ids = set(db.scalars(statement).all())
-        requested_ids = set(material_ids)
+        material_records = db.execute(statement).all()
 
+        existing_ids = {
+            material_id
+            for material_id, _ in material_records
+        }
+
+        requested_ids = set(material_ids)
         missing_ids = requested_ids - existing_ids
 
+        # Reject nonexistent materials
         if missing_ids:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -167,6 +207,22 @@ def replace_centre_materials(
                         str(material_id)
                         for material_id in missing_ids
                     ],
+                },
+            )
+
+        # Reject non-recyclable materials
+        non_recyclable_ids = [
+            str(material_id)
+            for material_id, recyclable in material_records
+            if not recyclable
+        ]
+
+        if non_recyclable_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "message": "Non-recyclable materials cannot be accepted",
+                    "material_ids": non_recyclable_ids,
                 },
             )
 
@@ -194,7 +250,7 @@ def replace_centre_materials(
         db.rollback()
         raise
 
-    # Return the updated material list
+    # Return updated material list
     return get_centre_materials(
         db=db,
         current_user_id=current_user_id,

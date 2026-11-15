@@ -21,18 +21,17 @@ class RecyclingCentreCreate(BaseModel):
 
 
 class RecyclingCentreUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=150)
-    address: str | None = Field(default=None, min_length=5, max_length=1000)
-    city: str | None = Field(default=None, min_length=2, max_length=100)
-    state: str | None = Field(default=None, min_length=2, max_length=100)
+    name: str = Field(default=None, min_length=2, max_length=150)
+    address: str = Field(default=None, min_length=5, max_length=1000)
+    city: str = Field(default=None, min_length=2, max_length=100)
+    state: str = Field(default=None, min_length=2, max_length=100)
 
     postal_code: str | None = Field(default=None, max_length=20)
 
-    latitude: float | None = Field(default=None, ge=-90, le=90)
-    longitude: float | None = Field(default=None, ge=-180, le=180)
+    latitude: float = Field(default=None, ge=-90, le=90)
+    longitude: float = Field(default=None, ge=-180, le=180)
 
     contact_number: str | None = Field(default=None, max_length=20)
-    
 
 
 class RecyclingCentreResponse(BaseModel):

@@ -471,3 +471,40 @@ def test_recycler_cannot_update_another_recyclers_materials(
     )
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+def test_non_recyclable_material_is_rejected(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+    centre = create_test_centre(db_session, recycler)
+
+    material = Material(
+        name=f"NonRecyclable-{uuid4()}",
+        category="Plastic",
+        description="Non-recyclable test material",
+        recyclable=False,
+        biodegradable=False,
+    )
+
+    db_session.add(material)
+    db_session.commit()
+    db_session.refresh(material)
+
+    response = api_client.put(
+        f"/recycler/centres/{centre.id}/materials",
+        json={
+            "material_ids": [str(material.id)]
+        },
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    final_response = api_client.get(
+        f"/recycler/centres/{centre.id}/materials",
+        headers=get_auth_headers(recycler),
+    )
+
+    assert final_response.status_code == status.HTTP_200_OK
+    assert final_response.json() == []
