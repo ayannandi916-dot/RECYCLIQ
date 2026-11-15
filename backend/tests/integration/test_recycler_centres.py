@@ -754,3 +754,122 @@ def test_invalid_replacement_preserves_existing_materials(
     returned_ids = {item["id"] for item in final_response.json()}
 
     assert returned_ids == {str(material_one.id)}
+
+# =========================================================
+# CRUD VALIDATION HARDENING
+# =========================================================
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "name",
+        "address",
+        "city",
+        "state",
+        "latitude",
+        "longitude",
+    ],
+)
+def test_required_centre_fields_cannot_be_set_to_null(
+    api_client,
+    db_session,
+    field,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}",
+        json={field: None},
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+def test_partial_update_preserves_unchanged_centre_fields(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}",
+        json={"name": "Updated Centre Name"},
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+    data = response.json()
+
+    assert data["name"] == "Updated Centre Name"
+    assert data["address"] == "12 Eco Park Road"
+    assert data["city"] == "Kolkata"
+    assert data["state"] == "West Bengal"
+    assert data["latitude"] == 22.5726
+    assert data["longitude"] == 88.3639
+
+
+def test_nullable_contact_number_can_be_cleared(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}",
+        json={"contact_number": None},
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["contact_number"] is None
+
+
+def test_nullable_postal_code_can_be_cleared(
+    api_client,
+    db_session,
+):
+    recycler = create_test_user(db_session, role="recycler")
+
+    create_response = api_client.post(
+        "/recycler/centres",
+        json=centre_payload(),
+        headers=get_auth_headers(recycler),
+    )
+
+    centre_id = create_response.json()["id"]
+
+    response = api_client.put(
+        f"/recycler/centres/{centre_id}",
+        json={"postal_code": None},
+        headers=get_auth_headers(recycler),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["postal_code"] is None
