@@ -1,14 +1,18 @@
 import pytest
-from uuid import uuid4
+from uuid import UUID, uuid4
 from fastapi import status
 
 from app.models.recycler_application import RecyclerApplication
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.utils.security import hash_password, create_access_token
 from unittest.mock import Mock
 from sqlalchemy.exc import IntegrityError
 
-from app.services.recycler_service import submit_application
+from app.services.recycler_service import (
+    submit_application,
+    approve_application,
+)
 from app.schemas.recycler import RecyclerApplicationCreate
 
 
@@ -437,3 +441,57 @@ def test_non_admin_cannot_reject_application(api_client, db_session):
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
+
+
+
+def test_application_approval_rolls_back_when_audit_logging_fails(
+    api_client,
+    db_session,
+    monkeypatch,
+):
+    user = create_test_user(db_session)
+    admin = create_test_user(db_session, role="admin")
+
+    response = api_client.post(
+        "/recycler/apply",
+        json=application_payload(),
+        headers=get_auth_headers(user),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+
+    application_id = UUID(response.json()["id"])
+
+    def fail_audit_logging(*args, **kwargs):
+        raise RuntimeError("Simulated audit logging failure")
+
+    monkeypatch.setattr(
+        "app.services.recycler_service.log_admin_action",
+        fail_audit_logging,
+    )
+
+    with pytest.raises(RuntimeError):
+        approve_application(
+            db=db_session,
+            application_id=application_id,
+            admin=admin,
+        )
+
+    db_session.expire_all()
+
+    updated_application = db_session.get(
+        RecyclerApplication,
+        application_id,
+    )
+    updated_user = db_session.get(User, user.id)
+
+    assert updated_application.status == "pending"
+    assert updated_user.role == "user"
+
+    audit_count = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.resource_id == application_id)
+        .count()
+    )
+
+    assert audit_count == 0

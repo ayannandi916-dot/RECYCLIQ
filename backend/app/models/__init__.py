@@ -7,6 +7,7 @@ from app.models.recommendation import Recommendation
 from app.models.recycling_centre import RecyclingCentre
 from app.models.recycling_centre_material import RecyclingCentreMaterial
 from app.models.recycler_application import RecyclerApplication
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -18,4 +19,5 @@ __all__ = [
     "RecyclingCentre",
     "RecyclingCentreMaterial",
     "RecyclerApplication",
+    "AuditLog",
 ]

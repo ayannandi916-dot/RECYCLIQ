@@ -70,7 +70,7 @@ def activate_user(
         db=db,
         user_id=user_id,
         is_active=True,
-        admin_id=admin.id,
+        admin=admin,
     )
 
     return {
@@ -92,7 +92,7 @@ def deactivate_user(
         db=db,
         user_id=user_id,
         is_active=False,
-        admin_id=admin.id,
+        admin=admin,
     )
 
     return {

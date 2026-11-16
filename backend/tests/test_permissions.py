@@ -96,18 +96,13 @@ def test_unrecognized_role_denied():
 
 # 8. No roles allowed
 def test_no_roles_allowed():
+    with pytest.raises(
+        ValueError,
+        match="At least one allowed role must be specified."
+    ):
+        require_role()
 
-    checker = require_role()
-
-    user = MockUser("admin")
-
-    with pytest.raises(HTTPException) as exc:
-
-        checker(user)
-
-    assert exc.value.status_code == 403
-
-
+        
 # 9. Returned user remains unchanged
 def test_user_object_remains_unchanged():
 

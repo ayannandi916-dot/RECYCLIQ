@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.recycling_centre import RecyclingCentre
 from app.utils.security import hash_password, create_access_token
-
+import pytest
+from app.models.audit_log import AuditLog
+from app.services.admin_centre_service import set_centre_status
 
 # =========================================================
 # HELPERS
@@ -463,3 +465,46 @@ def test_admin_centre_invalid_pagination_returns_422(
     )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+def test_centre_status_change_rolls_back_when_audit_logging_fails(
+    db_session,
+    monkeypatch,
+):
+    admin = create_test_user(db_session, role="admin")
+    recycler = create_test_user(db_session, role="recycler")
+    centre = create_test_centre(
+        db_session,
+        recycler.id,
+        is_active=True,
+    )
+
+    def fail_audit_logging(*args, **kwargs):
+        raise RuntimeError("Simulated audit logging failure")
+
+    monkeypatch.setattr(
+        "app.services.admin_centre_service.log_admin_action",
+        fail_audit_logging,
+    )
+
+    with pytest.raises(RuntimeError):
+        set_centre_status(
+            db=db_session,
+            centre_id=centre.id,
+            is_active=False,
+            admin=admin,
+        )
+
+    db_session.expire_all()
+
+    updated_centre = db_session.get(RecyclingCentre, centre.id)
+
+    assert updated_centre.is_active is True
+
+    audit_count = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.resource_id == centre.id)
+        .count()
+    )
+
+    assert audit_count == 0
