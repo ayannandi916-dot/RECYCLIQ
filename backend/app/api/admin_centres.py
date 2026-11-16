@@ -69,6 +69,7 @@ def activate_centre(
         db=db,
         centre_id=centre_id,
         is_active=True,
+        admin=admin,
     )
 
 
@@ -85,4 +86,5 @@ def deactivate_centre(
         db=db,
         centre_id=centre_id,
         is_active=False,
+        admin=admin,
     )

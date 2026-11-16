@@ -21,6 +21,7 @@ from app.models import (
     RecyclingCentre,
     RecyclingCentreMaterial,
     RecyclerApplication,
+    AuditLog,
 )
 
 

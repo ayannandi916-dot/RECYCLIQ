@@ -13,7 +13,7 @@ from app.schemas.recycler import (
     RecyclerApplicationUpdate,
     RecyclerApplicationReject,
 )
-
+from app.services.audit_log_service import log_admin_action
 
 def submit_application(
     db: Session,
@@ -219,12 +219,31 @@ def approve_application(
         )
 
     try:
+        old_status = application.status
+        old_role = applicant.role
+
         application.status = "approved"
         application.reviewed_by = admin.id
         application.reviewed_at = datetime.now(timezone.utc)
         application.rejection_reason = None
 
         applicant.role = "recycler"
+
+        log_admin_action(
+            db=db,
+            admin=admin,
+            action="APPROVE",
+            resource_type="RECYCLER_APPLICATION",
+            resource_id=application.id,
+            old_values={
+                "status": old_status,
+                "applicant_role": old_role,
+            },
+            new_values={
+                "status": "approved",
+                "applicant_role": "recycler",
+            },
+        )
 
         db.commit()
         db.refresh(application)
@@ -234,7 +253,6 @@ def approve_application(
     except Exception:
         db.rollback()
         raise
-
 
 def reject_application(
     db: Session,
@@ -258,10 +276,26 @@ def reject_application(
         )
 
     try:
+        old_status = application.status
+
         application.status = "rejected"
         application.rejection_reason = data.reason
         application.reviewed_by = admin.id
         application.reviewed_at = datetime.now(timezone.utc)
+
+        log_admin_action(
+            db=db,
+            admin=admin,
+            action="REJECT",
+            resource_type="RECYCLER_APPLICATION",
+            resource_id=application.id,
+            old_values={
+                "status": old_status,
+            },
+            new_values={
+                "status": "rejected",
+            },
+        )
 
         db.commit()
         db.refresh(application)

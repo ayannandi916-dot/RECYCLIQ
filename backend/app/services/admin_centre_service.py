@@ -4,7 +4,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
+from app.models import User
 from app.models.recycling_centre import RecyclingCentre
+from app.services.audit_log_service import log_admin_action
 
 
 def list_all_centres(
@@ -82,17 +84,38 @@ def set_centre_status(
     db: Session,
     centre_id: UUID,
     is_active: bool,
+    admin: User,
 ):
-    centre = get_admin_centre(db, centre_id)
-
-    # Idempotent: repeated requests do not cause errors.
-    if centre.is_active == is_active:
-        return centre
-
     try:
+        centre = get_admin_centre(db, centre_id)
+
+        # Idempotent: repeated requests do not create duplicate logs.
+        if centre.is_active == is_active:
+            db.rollback()
+            return centre
+
+        old_status = centre.is_active
+
         centre.is_active = is_active
+
+        log_admin_action(
+            db=db,
+            admin=admin,
+            action="ACTIVATE" if is_active else "DEACTIVATE",
+            resource_type="RECYCLING_CENTRE",
+            resource_id=centre.id,
+            old_values={
+                "is_active": old_status,
+            },
+            new_values={
+                "is_active": is_active,
+            },
+        )
+
+        # Commit centre update and audit record together.
         db.commit()
         db.refresh(centre)
+
         return centre
 
     except Exception:

@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.services.audit_log_service import log_admin_action
 
 
 def list_users(
@@ -60,14 +61,26 @@ def get_user_by_id(db: Session, user_id: UUID) -> User:
 
     return user
 
+
 def set_user_active_status(
     db: Session,
     user_id: UUID,
     is_active: bool,
-    admin_id: UUID,
+    admin: User | None = None,
+    admin_id: UUID | None = None,
 ) -> User:
 
     try:
+        # Resolve administrator for both supported calling styles.
+        if admin is None:
+            if admin_id is None:
+                raise ValueError("An administrator must be provided.")
+
+            admin = db.query(User).filter(User.id == admin_id).first()
+
+        if admin is None or admin.role != "admin":
+            raise ValueError("Valid administrator not found.")
+
         # Serialize administrator deactivation operations.
         if not is_active:
             db.execute(
@@ -78,7 +91,7 @@ def set_user_active_status(
         user = get_user_by_id(db, user_id)
 
         # Prevent an admin from deactivating their own account.
-        if not is_active and user.id == admin_id:
+        if not is_active and user.id == admin.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You cannot deactivate your own account.",
@@ -101,13 +114,31 @@ def set_user_active_status(
                     detail="Cannot deactivate the last active administrator.",
                 )
 
-        # Idempotent operation.
+        # Idempotent operation: don't create duplicate audit entries.
         if user.is_active == is_active:
             db.rollback()
             return user
 
+        old_status = user.is_active
+
         user.is_active = is_active
 
+        # Record the administrative action.
+        log_admin_action(
+            db=db,
+            admin=admin,
+            action="ACTIVATE" if is_active else "DEACTIVATE",
+            resource_type="USER",
+            resource_id=user.id,
+            old_values={
+                "is_active": old_status,
+            },
+            new_values={
+                "is_active": is_active,
+            },
+        )
+
+        # Commit user update and audit record together.
         db.commit()
         db.refresh(user)
 

@@ -19,7 +19,7 @@ from app.api.admin import router as admin_user_router
 from app.api.admin_centres import router as admin_centres_router
 from app.api.admin_analytics import router as admin_analytics_router
 from app.api.public_centres import router as public_centres_router
-
+from app.api.admin_audit_logs import router as admin_audit_logs_router
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,7 @@ app.include_router(admin_recycler_router)
 app.include_router(admin_user_router)
 app.include_router(admin_centres_router)
 app.include_router(admin_analytics_router)
+app.include_router(admin_audit_logs_router)
 app.include_router(public_centres_router)
 
 

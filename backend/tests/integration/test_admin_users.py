@@ -13,8 +13,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import sessionmaker
 
 from app.services.admin_service import set_user_active_status
-
-
+from app.models.audit_log import AuditLog
+from app.api.permissions import require_role
 # =========================================================
 # HELPERS
 # =========================================================
@@ -545,3 +545,95 @@ def test_concurrent_admin_deactivation_preserves_one_active_admin(
 
         finally:
             cleanup_session.close()
+
+
+def test_user_status_change_rolls_back_when_audit_logging_fails(
+    db_session,
+    monkeypatch,
+):
+    admin = create_test_user(db_session, role="admin")
+    user = create_test_user(db_session, is_active=True)
+
+    def fail_audit_logging(*args, **kwargs):
+        raise RuntimeError("Simulated audit logging failure")
+
+    monkeypatch.setattr(
+        "app.services.admin_service.log_admin_action",
+        fail_audit_logging,
+    )
+
+    with pytest.raises(RuntimeError):
+        set_user_active_status(
+            db=db_session,
+            user_id=user.id,
+            is_active=False,
+            admin=admin,
+        )
+
+    db_session.expire_all()
+
+    updated_user = db_session.get(User, user.id)
+
+    assert updated_user.is_active is True
+
+    audit_count = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.resource_id == user.id)
+        .count()
+    )
+
+    assert audit_count == 0
+
+# =========================================================
+# G8 — PERMISSION CONFIGURATION AND ROLE SECURITY
+# =========================================================
+
+def test_require_role_rejects_empty_role_configuration():
+    with pytest.raises(ValueError):
+        require_role()
+
+
+def test_require_role_rejects_invalid_role_configuration():
+    with pytest.raises(ValueError):
+        require_role("superadmin")
+
+
+def test_stale_jwt_role_claim_does_not_grant_admin_access(
+    api_client,
+    db_session,
+):
+    admin = create_test_user(db_session, role="admin")
+
+    # JWT claims user, but database identifies the account as admin.
+    token = create_access_token({
+        "sub": str(admin.id),
+        "role": "user",
+    })
+
+    response = api_client.get(
+        "/admin/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+
+
+def test_admin_role_downgrade_revokes_existing_token_access(
+    api_client,
+    db_session,
+):
+    admin = create_test_user(db_session, role="admin")
+
+    # Generate token while account is an administrator.
+    headers = get_auth_headers(admin)
+
+    # Downgrade the account in the database.
+    admin.role = "user"
+    db_session.commit()
+
+    response = api_client.get(
+        "/admin/users",
+        headers=headers,
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
